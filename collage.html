@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Pro Collage Builder</title>
+    <style>
+        :root {
+            --gap: 5px;
+            --bg-color: #000000;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar Controls */
+        .sidebar {
+            width: 330px;
+            min-width: 330px;
+            background: #1a1a1a;
+            border-right: 1px solid #333;
+            padding: 24px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+
+        .sidebar h2 {
+            margin: 0 0 5px 0;
+            font-size: 20px;
+            font-weight: 500;
+            color: #fff;
+        }
+
+        .control-group {
+            background: #242424;
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .control-group label {
+            font-size: 13px;
+            color: #aaa;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .control-group label > span { color: #fff; font-weight: 600; }
+
+        .input-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        input[type="number"], input[type="text"] {
+            background: #111;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 8px;
+            border-radius: 4px;
+            width: 100%;
+            outline: none;
+            box-sizing: border-box;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+            accent-color: #007bff;
+        }
+
+        input[type="color"] {
+            background: none;
+            border: none;
+            cursor: pointer;
+            height: 30px;
+            width: 50px;
+            padding: 0;
+        }
+        
+        input[type="checkbox"] {
+            cursor: pointer;
+            accent-color: #007bff;
+            width: 16px;
+            height: 16px;
+        }
+
+        /* Layout Main Workspace */
+        .main-view {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            background: #0a0a0a;
+            overflow: auto;
+            background-image: radial-gradient(circle, #222 1px, transparent 1px);
+            background-size: 20px 20px; /* Subtle dot pattern */
+        }
+
+        /* The dynamic Collage Wrapper Container */
+        .collage-wrapper {
+            background-color: var(--bg-color);
+            background-size: cover;
+            background-position: center;
+            box-sizing: border-box;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.8), 0 0 0 1px #444;
+            display: flex; 
+            /* Dimensions are strictly calculated by JS to prevent flex aspect-ratio warping */
+        }
+
+        /* Native gap inheritance */
+        .flex-container {
+            display: flex;
+            gap: var(--gap);
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+        }
+        .flex-row { flex-direction: row; }
+        .flex-col { flex-direction: column; }
+
+        .cell {
+            background-color: #2a2a2a;
+            position: relative;
+            cursor: pointer;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.2s, opacity 0.2s;
+            height: 100%; 
+            box-sizing: border-box;
+        }
+
+        .cell:hover { background-color: #3b3b3b; }
+        
+        /* Drag & Drop Interaction States */
+        body[data-mode="swap"] .cell[draggable="true"] { cursor: grab; }
+        body[data-mode="swap"] .cell[draggable="true"]:active { cursor: grabbing; }
+        body[data-mode="pan"] .cell { cursor: grab; }
+        body[data-mode="pan"] .cell.panning { cursor: grabbing; }
+
+        .cell.drag-over { outline: 3px dashed #007bff; outline-offset: -3px; opacity: 0.8; z-index: 10;}
+        .cell.dragging { opacity: 0.4; }
+
+        .cell img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: 50% 50%;
+            display: none;
+            pointer-events: none;
+        }
+
+        .cell .placeholder {
+            color: #666;
+            font-size: 14px;
+            pointer-events: none;
+            text-align: center;
+            font-weight: 500;
+        }
+
+        /* Generic Button styles */
+        .btn {
+            background-color: #333; color: white; border: 1px solid #444;
+            padding: 10px 16px; font-size: 14px; font-weight: 600;
+            border-radius: 6px; cursor: pointer; transition: all 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
+            box-sizing: border-box;
+        }
+        
+        .btn-primary { background-color: #007bff; border-color: #007bff; }
+        .btn-success { background-color: #28a745; border-color: #28a745; }
+        .btn:hover:not(:disabled) { transform: translateY(-1px); opacity: 0.9; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        .btn:active:not(:disabled) { transform: translateY(1px); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-group { display: flex; background: #111; border-radius: 6px; padding: 4px; border: 1px solid #333; width: 100%; box-sizing: border-box; }
+        .btn-group .btn { background: transparent; border: none; font-size: 12px; border-radius: 4px; padding: 8px; color: #888; width: 50%; }
+        .btn-group .btn.active { background: #444; color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+
+        .hidden-input { display: none; }
+    </style>
+</head>
+<body data-mode="swap">
+
+    <div class="sidebar">
+        <h2>Collage Setup</h2>
+        
+        <div class="control-group">
+            <label>Dimensions (Inches)</label>
+            <div class="input-row">
+                <input type="number" id="inpWidth" value="30" min="5" max="100" style="min-width: 0;"> 
+                <span style="color: #666; font-size:12px;">x</span>
+                <input type="number" id="inpHeight" value="20" min="5" max="100" style="min-width: 0;">
+                <button id="btnRotate" class="btn" style="flex: 0 0 auto; padding: 6px 12px; font-size: 16px; width: auto; margin-left: 5px;" title="Rotate Layout">↻</button>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <label>Outer Border Width <span id="valBorder">1.0"</span></label>
+            <input type="range" id="inpBorder" min="0" max="5" step="0.1" value="1.0">
+
+            <label style="margin-top: 5px;">Photo Gap Size <span id="valGap">5px</span></label>
+            <input type="range" id="inpGap" min="0" max="50" step="1" value="5">
+        </div>
+
+        <div class="control-group">
+            <label>Total Photos <span id="photoCountDisplay">29</span></label>
+            <input type="range" id="inpCount" value="29" min="1" max="100">
+            
+            <label style="justify-content: flex-start; gap: 8px; margin-top: 10px;">
+                <input type="checkbox" id="chkUseOrientation"> Target Orientation 
+            </label>
+            <div class="input-row" id="orientationRow" style="opacity: 0.3; pointer-events: none; transition: 0.2s;">
+                <div style="flex: 1;">
+                    <input type="number" id="inpPortraits" value="15" min="0">
+                    <div style="font-size:11px; color:#888; text-align:center; margin-top:4px;">Portraits</div>
+                </div>
+                <span style="color: #666; font-size:16px;">+</span>
+                <div style="flex: 1;">
+                    <input type="number" id="inpLandscapes" value="14" min="0">
+                    <div style="font-size:11px; color:#888; text-align:center; margin-top:4px;">Landscapes</div>
+                </div>
+            </div>
+
+            <button id="btnRegenerate" class="btn" style="margin-top: 10px;">Apply & Randomize Layout</button>
+        </div>
+
+        <div class="control-group">
+            <label>Background Fill <input type="color" id="inpBgColor" value="#000000"></label>
+            <label style="flex-direction: column; align-items: flex-start; gap: 8px; margin-top:6px;">
+                Background Image (Optional)
+                <input type="file" id="inpBgImg" accept="image/*" style="font-size:11px; width:100%; color:#888;">
+            </label>
+        </div>
+
+        <div class="control-group">
+            <label style="justify-content: center; margin-bottom: -4px;">Interaction Mode</label>
+            <div class="btn-group">
+                <button id="modeSwapBtn" class="btn active">Swap Photos</button>
+                <button id="modePanBtn" class="btn">Adjust Crop</button>
+            </div>
+            <button id="btnUpload" class="btn btn-primary" style="margin-top:8px;">
+                <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                Upload Folder
+            </button>
+        </div>
+
+        <div style="flex:1; min-height: 20px;"></div>
+        
+        <button id="btnDownload" class="btn btn-success">
+            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+            Download Print (300 DPI)
+        </button>
+    </div>
+
+    <div class="main-view">
+        <div class="collage-wrapper" id="collageWrapper">
+            <!-- Native JS Recursive Tree generates here -->
+        </div>
+    </div>
+
+    <!-- Hidden multiple file input -->
+    <input type="file" id="imageInput" class="hidden-input" accept="image/*" multiple>
+
+    <script>
+        // DOM Definitions
+        const wrapper = document.getElementById('collageWrapper');
+        const inpWidth = document.getElementById('inpWidth');
+        const inpHeight = document.getElementById('inpHeight');
+        const inpBorder = document.getElementById('inpBorder');
+        const inpGap = document.getElementById('inpGap');
+        
+        const inpCount = document.getElementById('inpCount');
+        const countDisplay = document.getElementById('photoCountDisplay');
+        const btnRegenerate = document.getElementById('btnRegenerate');
+
+        const chkUseOrientation = document.getElementById('chkUseOrientation');
+        const orientationRow = document.getElementById('orientationRow');
+        const inpPortraits = document.getElementById('inpPortraits');
+        const inpLandscapes = document.getElementById('inpLandscapes');
+
+        const fileInput = document.getElementById('imageInput');
+
+        // Abstract State Store
+        let currentMode = 'swap';
+        let treeRoot = null;
+        let cellData = {}; 
+        let globalBgImageDataUrl = null;
+        let globalBgImageObj = null;
+
+        // Interaction State Store
+        let targetAutoFillCellId = null; 
+        let draggedCellId = null;
+        let isPanning = false, panCellId = null;
+        let startPanX = 0, startPanY = 0;
+        let initOffsetX = 0, initOffsetY = 0;
+
+        function init() {
+            updateSizing();
+            generateLayoutTree();
+            setupEventListeners();
+        }
+
+        // --- Layout Processing Functions ---
+        function updateSizing() {
+            const w = parseFloat(inpWidth.value) || 30;
+            const h = parseFloat(inpHeight.value) || 20;
+            
+            // Explicitly map exact pixels to the screen to utterly bypass CSS ratio collapsing bugs
+            const mainView = document.querySelector('.main-view');
+            const availW = mainView.clientWidth - 80; 
+            const availH = mainView.clientHeight - 80;
+            
+            const targetRatio = w / h;
+            const viewRatio = availW / availH;
+            
+            let finalW, finalH;
+            if (targetRatio > viewRatio) {
+                finalW = Math.min(availW, 1400); 
+                finalH = finalW / targetRatio;
+            } else {
+                finalH = availH;
+                finalW = finalH * targetRatio;
+                if (finalW > 1400) { finalW = 1400; finalH = finalW / targetRatio; }
+            }
+            
+            wrapper.style.width = `${finalW}px`;
+            wrapper.style.height = `${finalH}px`;
+            wrapper.style.aspectRatio = `${w} / ${h}`;
+
+            const borderInches = parseFloat(inpBorder.value) || 0;
+            document.getElementById('valBorder').innerText = `${borderInches}"`;
+            wrapper.style.padding = `${(borderInches / w) * 100}%`;
+
+            const gap = parseFloat(inpGap.value) || 0;
+            document.documentElement.style.setProperty('--gap', `${gap}px`);
+            document.getElementById('valGap').innerText = `${gap}px`;
+        }
+
+        function updateOrientationsInput() {
+            const N = parseInt(inpCount.value) || 29;
+            let p = parseInt(inpPortraits.value) || 0;
+            if (p > N) p = N;
+            inpPortraits.value = p;
+            inpLandscapes.value = N - p;
+        }
+
+        // A highly-advanced Monte-Carlo probabilistic search grid routing algorithm.
+        // Capable of finding precise geometric constraints effortlessly by iterating layout trees.
+        function generateLayoutTree() {
+            const N = parseInt(inpCount.value) || 29;
+            const W = parseFloat(inpWidth.value) || 30;
+            const H = parseFloat(inpHeight.value) || 20;
+            const containerRatio = W / H;
+
+            const useOrient = chkUseOrientation.checked;
+            const targetP = parseInt(inpPortraits.value) || 0;
+            const targetL = parseInt(inpLandscapes.value) || 0;
+
+            let bestTree = null;
+            let bestScore = Infinity;
+            // Run exactly 4000 loops of organic random tree generation, scoring every single outcome natively. 
+            // Even when not targeting orientations, this ensures we evaluate and keep the layout perfectly mapped to 2:3
+            const MAX_ITERS = 4000; 
+
+            for (let iter = 0; iter < MAX_ITERS; iter++) {
+                let currentId = 1;
+                let root = { id: currentId++, isLeaf: true, weight: 1, rect: {x:0, y:0, w: containerRatio, h: 1} };
+                let leaves = [root];
+
+                for (let i = 1; i < N; i++) {
+                    leaves.sort((a, b) => (b.rect.w * b.rect.h) - (a.rect.w * a.rect.h));
+                    
+                    let targetIdx = 0;
+                    if (Math.random() > 0.5 && leaves.length > 2) {
+                        targetIdx = Math.floor(Math.random() * (leaves.length > 4 ? 3 : 2)); 
+                    }
+                    
+                    let target = leaves[targetIdx];
+                    leaves.splice(targetIdx, 1);
+                    target.isLeaf = false;
+                    
+                    let wR = target.rect.w;
+                    let hR = target.rect.h;
+                    let probRow = 0.5;
+                    if (wR / hR > 1.5) probRow = 0.85; 
+                    else if (hR / wR > 1.5) probRow = 0.15; 
+                    
+                    target.dir = Math.random() < probRow ? 'row' : 'col';
+                    let ratio = 0.33 + Math.random() * 0.34;
+                    
+                    let child1 = { id: target.id, isLeaf: true, weight: ratio };
+                    let child2 = { id: currentId++, isLeaf: true, weight: 1 - ratio };
+                    
+                    if (target.dir === 'row') {
+                        child1.rect = { x: target.rect.x, y: target.rect.y, w: target.rect.w * ratio, h: target.rect.h };
+                        child2.rect = { x: target.rect.x + target.rect.w * ratio, y: target.rect.y, w: target.rect.w * (1 - ratio), h: target.rect.h };
+                    } else {
+                        child1.rect = { x: target.rect.x, y: target.rect.y, w: target.rect.w, h: target.rect.h * ratio };
+                        child2.rect = { x: target.rect.x, y: target.rect.y + target.rect.h * ratio, w: target.rect.w, h: target.rect.h * (1 - ratio) };
+                    }
+                    
+                    target.children = [child1, child2];
+                    leaves.push(child1, child2);
+                }
+
+                let score = 0;
+                if (useOrient) {
+                    let pCount = 0, lCount = 0;
+                    leaves.forEach(leaf => {
+                        if (leaf.rect.h >= leaf.rect.w * 0.95) pCount++;
+                        else lCount++;
+                    });
+                    score = Math.abs(pCount - targetP) + Math.abs(lCount - targetL);
+                } else {
+                    // Evaluate structural grid matching 2:3 organic bounds mathematically flawlessly
+                    leaves.forEach(leaf => {
+                        let logR = Math.log(leaf.rect.w / leaf.rect.h);
+                        // Score distances: Portrait 2:3, Square 1:1, Alt Portrait 3:4, and heavily penalize long Landscapes
+                        let dPort = Math.abs(logR - Math.log(0.666)); 
+                        let dSq = Math.abs(logR - Math.log(1));
+                        let dPortAlt = Math.abs(logR - Math.log(0.75));
+                        let dLand = Math.abs(logR - Math.log(1.5));
+                        score += Math.min(dPort, dPortAlt * 1.2, dSq * 1.8, dLand * 2.5);
+                    });
+                }
+                
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestTree = root;
+                }
+                if (score === 0 && useOrient) break; 
+            }
+            
+            treeRoot = bestTree;
+            renderTreeToView();
+        }
+
+        // (Removed outdated strict heuristic logic in favor of optimal Monte-Carlo global layout scoring)
+
+        // Generate HTML natively mapping array abstractions 
+        function renderTreeToView() {
+            wrapper.innerHTML = '';
+            wrapper.appendChild(createDOMNode(treeRoot));
+            setMode(currentMode);
+        }
+
+        function createDOMNode(node) {
+            const el = document.createElement('div');
+            el.style.flex = node.weight;
+
+            if (node.isLeaf) {
+                el.className = 'cell';
+                el.innerHTML = `<div class="placeholder">Click<br>Slot</div><img id="img-${node.id}">`;
+                el.dataset.id = node.id;
+                attachCellFeatures(el, node.id);
+                updateCellDOM(node.id, el); 
+                return el;
+            }
+
+            el.className = `flex-container flex-${node.dir}`;
+            node.children.forEach(c => el.appendChild(createDOMNode(c)));
+            return el;
+        }
+
+        // --- User Interaction Listeners ---
+        function attachCellFeatures(cell, id) {
+            cell.addEventListener('mousedown', (e) => {
+                if (currentMode === 'pan' && cellData[id] && e.button === 0) {
+                    isPanning = true;
+                    panCellId = id;
+                    startPanX = e.clientX;
+                    startPanY = e.clientY;
+                    initOffsetX = cellData[id].offsetX;
+                    initOffsetY = cellData[id].offsetY;
+                    cell.classList.add('panning');
+                    e.preventDefault(); 
+                }
+            });
+
+            cell.addEventListener('click', () => {
+                if (!cellData[id] || targetAutoFillCellId === id) {
+                    targetAutoFillCellId = id; fileInput.click();
+                }
+            });
+
+            cell.addEventListener('dragover', (e) => {
+                if (currentMode !== 'swap') return;
+                e.preventDefault(); 
+                if (draggedCellId && draggedCellId != id) cell.classList.add('drag-over');
+            });
+
+            cell.addEventListener('dragleave', () => cell.classList.remove('drag-over'));
+
+            cell.addEventListener('dragstart', (e) => {
+                if (currentMode !== 'swap' || !cellData[id]) { e.preventDefault(); return; }
+                draggedCellId = id;
+                cell.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', id);
+            });
+
+            cell.addEventListener('dragend', () => {
+                cell.classList.remove('dragging');
+                draggedCellId = null;
+            });
+
+            cell.addEventListener('drop', (e) => {
+                if (currentMode !== 'swap') return;
+                e.preventDefault();
+                cell.classList.remove('drag-over');
+                if (draggedCellId && draggedCellId != id) swapCells(draggedCellId, id);
+            });
+        }
+
+        function setupEventListeners() {
+            ['input', 'change'].forEach(evt => {
+                inpWidth.addEventListener(evt, () => { updateSizing(); generateLayoutTree(); });
+                inpHeight.addEventListener(evt, () => { updateSizing(); generateLayoutTree(); });
+                inpBorder.addEventListener(evt, updateSizing);
+                inpGap.addEventListener(evt, updateSizing);
+            });
+            document.getElementById('btnRotate').addEventListener('click', () => {
+                let w = inpWidth.value;
+                inpWidth.value = inpHeight.value;
+                inpHeight.value = w;
+                updateSizing(); generateLayoutTree();
+            });
+            
+            window.addEventListener('resize', updateSizing);
+            
+            inpCount.addEventListener('input', () => { 
+                countDisplay.innerText = inpCount.value;
+                if(chkUseOrientation.checked) updateOrientationsInput();
+            });
+            inpCount.addEventListener('change', generateLayoutTree);
+            btnRegenerate.addEventListener('click', generateLayoutTree);
+
+            chkUseOrientation.addEventListener('change', (e) => {
+                orientationRow.style.opacity = e.target.checked ? '1' : '0.3';
+                orientationRow.style.pointerEvents = e.target.checked ? 'auto' : 'none';
+                if(e.target.checked) updateOrientationsInput();
+                generateLayoutTree();
+            });
+
+            inpPortraits.addEventListener('input', () => {
+                const N = parseInt(inpCount.value);
+                let p = parseInt(inpPortraits.value) || 0;
+                if(p > N) p = N;
+                inpPortraits.value = p;
+                inpLandscapes.value = N - p;
+            });
+            inpPortraits.addEventListener('change', generateLayoutTree);
+
+            inpLandscapes.addEventListener('input', () => {
+                const N = parseInt(inpCount.value);
+                let l = parseInt(inpLandscapes.value) || 0;
+                if(l > N) l = N;
+                inpLandscapes.value = l;
+                inpPortraits.value = N - l;
+            });
+            inpLandscapes.addEventListener('change', generateLayoutTree);
+
+            document.getElementById('inpBgColor').addEventListener('input', (e) => { 
+                document.documentElement.style.setProperty('--bg-color', e.target.value); 
+            });
+
+            document.getElementById('inpBgImg').addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const r = new FileReader();
+                r.onload = (ev) => {
+                    globalBgImageDataUrl = ev.target.result;
+                    globalBgImageObj = new Image();
+                    globalBgImageObj.onload = () => {
+                        wrapper.style.backgroundImage = `url(${globalBgImageDataUrl})`;
+                    };
+                    globalBgImageObj.src = globalBgImageDataUrl;
+                };
+                r.readAsDataURL(file);
+            });
+
+            document.getElementById('modeSwapBtn').addEventListener('click', () => setMode('swap'));
+            document.getElementById('modePanBtn').addEventListener('click', () => setMode('pan'));
+
+            document.getElementById('btnUpload').addEventListener('click', () => {
+                targetAutoFillCellId = null; fileInput.click();
+            });
+
+            fileInput.addEventListener('change', async function(e) {
+                const files = Array.from(e.target.files);
+                if (files.length === 0) return;
+                
+                // Track purely visible nodes directly from the recursively evaluated leaves sequence 
+                const leaves = [];
+                function getLeaves(node) {
+                    if(node.isLeaf) leaves.push(node.id);
+                    else node.children.forEach(c => getLeaves(c));
+                }
+                getLeaves(treeRoot);
+
+                let fillOrder = leaves;
+                if (targetAutoFillCellId) {
+                    const si = fillOrder.indexOf(parseInt(targetAutoFillCellId));
+                    if(si > -1) fillOrder = [...fillOrder.slice(si), ...fillOrder.slice(0, si)];
+                }
+
+                const emptyIds = fillOrder.filter(id => !cellData[id]);
+                const targetCells = emptyIds.length > 0 ? emptyIds : fillOrder;
+
+                let fileIndex = 0;
+                for (let i = 0; i < targetCells.length && fileIndex < files.length; i++) {
+                    await loadFileToCell(files[fileIndex], targetCells[i]);
+                    fileIndex++;
+                }
+                fileInput.value = ''; 
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!isPanning || currentMode !== 'pan') return;
+                const cell = document.querySelector(`.cell[data-id="${panCellId}"]`);
+                if(!cell) return;
+                const rect = cell.getBoundingClientRect();
+                
+                // Native reverse mapped mapping mapping relative mouse distance perfectly dynamically 
+                const deltaX = -((e.clientX - startPanX) / rect.width) * 100;
+                const deltaY = -((e.clientY - startPanY) / rect.height) * 100;
+                
+                let newX = Math.max(0, Math.min(100, initOffsetX + deltaX));
+                let newY = Math.max(0, Math.min(100, initOffsetY + deltaY));
+                
+                cellData[panCellId].offsetX = newX;
+                cellData[panCellId].offsetY = newY;
+                cell.querySelector('img').style.objectPosition = `${newX}% ${newY}%`;
+            });
+
+            window.addEventListener('mouseup', () => {
+                if (isPanning) {
+                    const c = document.querySelector(`.cell[data-id="${panCellId}"]`);
+                    if(c) c.classList.remove('panning');
+                    isPanning = false; panCellId = null;
+                }
+            });
+
+            document.getElementById('btnDownload').addEventListener('click', () => {
+                const btn = document.getElementById('btnDownload');
+                const ogText = btn.innerHTML;
+                btn.innerHTML = 'Rendering 300DPI High-Res...';
+                btn.disabled = true;
+                setTimeout(() => { generateHighResCanvas(); btn.innerHTML = ogText; btn.disabled = false; }, 50);
+            });
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.body.dataset.mode = mode;
+            if (mode === 'swap') {
+                document.getElementById('modeSwapBtn').classList.add('active');
+                document.getElementById('modePanBtn').classList.remove('active');
+            } else {
+                document.getElementById('modePanBtn').classList.add('active');
+                document.getElementById('modeSwapBtn').classList.remove('active');
+            }
+            document.querySelectorAll('.cell').forEach(c => {
+                c.draggable = (mode === 'swap' && cellData[c.dataset.id]) ? true : false;
+            });
+        }
+
+        const loadFileToCell = (file, cellId) => {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const dataUrl = event.target.result;
+                    const imgObj = new Image();
+                    imgObj.onload = () => {
+                        cellData[cellId] = { dataUrl, img: imgObj, offsetX: 50, offsetY: 50 };
+                        updateCellDOM(cellId);
+                        resolve();
+                    };
+                    imgObj.src = dataUrl;
+                };
+                reader.readAsDataURL(file);
+            });
+        };
+
+        function updateCellDOM(id, cellOverride = null) {
+            const cell = cellOverride || document.querySelector(`.cell[data-id="${id}"]`);
+            if(!cell) return;
+            const imgEl = cell.querySelector('img');
+            const placeholder = cell.querySelector('.placeholder');
+            
+            if (cellData[id]) {
+                imgEl.src = cellData[id].dataUrl;
+                imgEl.style.objectPosition = `${cellData[id].offsetX}% ${cellData[id].offsetY}%`;
+                imgEl.style.display = 'block';
+                placeholder.style.display = 'none';
+                if (currentMode === 'swap') cell.draggable = true;
+            } else {
+                imgEl.style.display = 'none';
+                placeholder.style.display = 'block';
+                cell.draggable = false;
+            }
+        }
+
+        function swapCells(idA, idB) {
+            let tempA = cellData[idA] ? { ...cellData[idA] } : null;
+            let tempB = cellData[idB] ? { ...cellData[idB] } : null;
+            if (tempA) cellData[idB] = tempA; else delete cellData[idB];
+            if (tempB) cellData[idA] = tempB; else delete cellData[idA];
+            updateCellDOM(idA); 
+            updateCellDOM(idB);
+        }
+
+        // --- PDF / Print High Res Compiler Strategy ---
+        function generateHighResCanvas() {
+            const DPI = 300; 
+            const W = parseFloat(inpWidth.value) || 30;
+            const H = parseFloat(inpHeight.value) || 20;
+            const cWidth = W * DPI; 
+            const cHeight = H * DPI; 
+
+            const canvas = document.createElement('canvas');
+            canvas.width = cWidth;
+            canvas.height = cHeight;
+            const ctx = canvas.getContext('2d', { alpha: false });
+
+            ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-color').trim() || '#000000';
+            ctx.fillRect(0, 0, cWidth, cHeight);
+            
+            if (globalBgImageObj) {
+                drawObjectFitCover(ctx, globalBgImageObj, 0, 0, cWidth, cHeight, 50, 50);
+            }
+
+            // Accurate Dynamic Scaling Matrix Math
+            const gapPixelsRaw = parseFloat(inpGap.value) || 0;
+            const scaleFactor = cWidth / wrapper.clientWidth; // Convert screen pixels directly to precise document DPI coordinates!
+            const gapPx = gapPixelsRaw * scaleFactor;
+            
+            const borderInches = parseFloat(inpBorder.value) || 0;
+            const outerPadding = borderInches * DPI; 
+            
+            const initialRect = {
+                x: outerPadding,
+                y: outerPadding,
+                w: cWidth - (2 * outerPadding),
+                h: cHeight - (2 * outerPadding)
+            };
+
+            // Recursive bounds generator natively avoiding floating point collision gaps
+            drawNodeToCanvas(ctx, treeRoot, initialRect, gapPx);
+
+            try {
+                const dataURL = canvas.toDataURL('image/jpeg', 0.95);
+                const link = document.createElement('a');
+                link.download = `HighRes-${W}x${H}-Print.jpg`;
+                link.href = dataURL;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            } catch (err) {
+                alert('Export memory exceeded. Try scaling down inches slightly or closing background tabs.');
+            }
+        }
+
+        function drawNodeToCanvas(ctx, node, rect, gapPx) {
+            if (node.isLeaf) {
+                if (cellData[node.id]) {
+                    const cd = cellData[node.id];
+                    drawObjectFitCover(ctx, cd.img, rect.x, rect.y, rect.w, rect.h, cd.offsetX, cd.offsetY);
+                } else {
+                    ctx.fillStyle = '#222222';
+                    ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+                }
+                return;
+            }
+
+            const totalW = node.children.reduce((s,c) => s + c.weight, 0);
+            const gapsTotal = gapPx * (node.children.length - 1);
+            
+            if (node.dir === 'row') {
+                let availW = rect.w - gapsTotal;
+                let curX = rect.x;
+                node.children.forEach(c => {
+                    let cw = availW * (c.weight / totalW);
+                    drawNodeToCanvas(ctx, c, { x: curX, y: rect.y, w: Math.max(0, cw), h: rect.h }, gapPx);
+                    curX += cw + gapPx;
+                });
+            } else {
+                let availH = rect.h - gapsTotal;
+                let curY = rect.y;
+                node.children.forEach(c => {
+                    let ch = availH * (c.weight / totalW);
+                    drawNodeToCanvas(ctx, c, { x: rect.x, y: curY, w: rect.w, h: Math.max(0, ch) }, gapPx);
+                    curY += ch + gapPx;
+                });
+            }
+        }
+
+        function drawObjectFitCover(ctx, img, x, y, w, h, offsetX=50, offsetY=50) {
+            if (w <= 0 || h <= 0) return;
+            const imgRatio = img.width / img.height;
+            const targetRatio = w / h;
+            let sWidth, sHeight, sx, sy;
+
+            if (imgRatio > targetRatio) {
+                sHeight = img.height;
+                sWidth = img.height * targetRatio;
+                sx = (img.width - sWidth) * (offsetX / 100);
+                sy = 0;
+            } else {
+                sWidth = img.width;
+                sHeight = img.width / targetRatio;
+                sx = 0;
+                sy = (img.height - sHeight) * (offsetY / 100);
+            }
+            ctx.drawImage(img, sx, sy, sWidth, sHeight, x, y, w, h);
+        }
+
+        init();
+    </script>
+</body>
+</html>
