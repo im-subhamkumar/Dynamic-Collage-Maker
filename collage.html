@@ -302,7 +302,7 @@
         const chkUseOrientation = document.getElementById('chkUseOrientation');
         const orientationRow = document.getElementById('orientationRow');
         const inpPortraits = document.getElementById('inpPortraits');
-        const inpLandscapes = document.getElementById('inpLandscapes');
+        const inpSquares = document.getElementById('inpSquares');
 
         const fileInput = document.getElementById('imageInput');
 
@@ -332,18 +332,16 @@
             document.getElementById('valBorder').innerText = `${borderInches}"`;
             const gap = parseFloat(inpGap.value) || 0;
             document.getElementById('valGap').innerText = `${gap}px`;
-            
+
             const W = parseFloat(inpWidth.value) || 30;
             const view = document.querySelector('.main-view');
-            // Safely scale explicit border tracking dynamically mapping output margins perfectly
-            const borderPx = 20 + (borderInches / W) * view.clientWidth;
-            view.style.padding = `${borderPx}px`;
+            
+            // Revert back to fixed padding on main-view. Border offsets are mapped on the wrapper dynamically!
+            view.style.padding = `40px`;
 
             generateLayoutTree();
         }
 
-        // The Ultimate Strict Matrix Generator 
-        // Zero floating-point chaos, exclusively forces EXACT 3:4 and 1:1 constraints mapping.
         function generateLayoutTree() {
             const N = parseInt(inpCount.value) || 29;
             const W_canvas = parseFloat(inpWidth.value) || 30; 
@@ -352,7 +350,7 @@
             const K = parseInt(document.getElementById('inpCenterLg').value) || 0;
             const useOrient = chkUseOrientation.checked;
             
-            const elSquares = document.getElementById('inpSquares') || document.getElementById('inpLandscapes'); 
+            const elSquares = document.getElementById('inpSquares'); 
             const inpPortraitsInput = document.getElementById('inpPortraits');
             
             let N_p = N;
@@ -381,7 +379,7 @@
 
             for (let extra = 0; extra <= 150; extra++) {
                 let testA = minA + extra;
-                let maxR = Math.ceil(Math.sqrt(testA * 5)); // generous bounds
+                let maxR = Math.ceil(Math.sqrt(testA * 5)); 
                 for (let R = 1; R <= maxR; R++) {
                     if (testA % R === 0) {
                         let C = testA / R;
@@ -458,7 +456,6 @@
                     if (!grid[r][c]) remainSpots.push({r, c});
                 }
             }
-            // Dynamically disperse negative space symmetrically eliminating contiguous clipping errors!
             remainSpots.sort(() => Math.random() - 0.5);
 
             let npPlaced = 0;
@@ -477,36 +474,55 @@
             if (!currentLayout) return;
             const { elements, Cols, Rows, targetCellRatio } = currentLayout;
             
+            const W_canvas = parseFloat(inpWidth.value) || 30; 
+            const H_canvas = parseFloat(inpHeight.value) || 20; 
+            const borderInches = parseFloat(inpBorder.value) || 0;
+
             const mainView = document.querySelector('.main-view');
-            const style = getComputedStyle(mainView);
-            const availW = mainView.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-            const availH = mainView.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
-            
-            const targetGridRatio = Cols / (Rows * targetCellRatio);
+            const availW = mainView.clientWidth - 80; // 40px fixed padding L/R
+            const availH = mainView.clientHeight - 80;
+
+            const canvasRatio = W_canvas / H_canvas;
             const availRatio = availW / availH;
             
-            let finalW, finalH;
-            if (targetGridRatio > availRatio) {
-                finalW = availW; 
-                finalH = finalW / targetGridRatio;
+            let wrapperW, wrapperH;
+            if (canvasRatio > availRatio) {
+                wrapperW = availW; 
+                wrapperH = wrapperW / canvasRatio;
             } else {
-                finalH = availH; 
-                finalW = finalH * targetGridRatio;
+                wrapperH = availH; 
+                wrapperW = wrapperH * canvasRatio;
             }
             
+            // Apply bounds proportionally
+            wrapper.style.width = `${wrapperW}px`;
+            wrapper.style.height = `${wrapperH}px`;
+            
+            let paddingPx = (borderInches / W_canvas) * wrapperW;
+            wrapper.style.padding = `${paddingPx}px`;
+
+            let innerW = wrapperW - 2 * paddingPx;
+            let innerH = wrapperH - 2 * paddingPx;
+            let targetGridRatio = Cols / (Rows * targetCellRatio);
+            
+            let gridW, gridH;
+            if (targetGridRatio > (innerW / innerH)) {
+                gridW = innerW;
+                gridH = gridW / targetGridRatio;
+            } else {
+                gridH = innerH;
+                gridW = gridH * targetGridRatio;
+            }
+
             const gapPx = parseFloat(inpGap.value) || 0;
             
-            wrapper.style.width = `${finalW}px`;
-            wrapper.style.height = `${finalH}px`;
             wrapper.style.display = 'grid';
-            wrapper.style.flexDirection = '';
-            wrapper.style.justifyContent = '';
-            wrapper.style.alignContent = '';
-            wrapper.style.gridTemplateColumns = `repeat(${Cols}, 1fr)`;
-            wrapper.style.gridTemplateRows = `repeat(${Rows}, 1fr)`;
+            wrapper.style.alignContent = 'center';
+            wrapper.style.justifyContent = 'center';
+            wrapper.style.gridTemplateColumns = `repeat(${Cols}, ${ (gridW - gapPx*(Cols-1))/Cols }px)`;
+            wrapper.style.gridTemplateRows = `repeat(${Rows}, ${ (gridH - gapPx*(Rows-1))/Rows }px)`;
             wrapper.style.gap = `${gapPx}px`;
-            wrapper.style.padding = '0'; 
-
+            
             wrapper.innerHTML = '';
             
             elements.forEach(el => {
@@ -629,18 +645,18 @@
                 let p = parseInt(inpPortraits.value) || 0;
                 if(p > N) p = N;
                 inpPortraits.value = p;
-                inpLandscapes.value = N - p;
+                inpSquares.value = N - p;
             });
             inpPortraits.addEventListener('change', generateLayoutTree);
 
-            inpLandscapes.addEventListener('input', () => {
+            inpSquares.addEventListener('input', () => {
                 const N = parseInt(inpCount.value);
-                let l = parseInt(inpLandscapes.value) || 0;
+                let l = parseInt(inpSquares.value) || 0;
                 if(l > N) l = N;
-                inpLandscapes.value = l;
+                inpSquares.value = l;
                 inpPortraits.value = N - l;
             });
-            inpLandscapes.addEventListener('change', generateLayoutTree);
+            inpSquares.addEventListener('change', generateLayoutTree);
 
             document.getElementById('inpBgColor').addEventListener('input', (e) => { 
                 document.documentElement.style.setProperty('--bg-color', e.target.value); 
@@ -823,7 +839,7 @@
             const availHPrint = cHeight - 2 * outerPadding;
             
             const domW = document.querySelector('.collage-wrapper').clientWidth;
-            const scaleFactor = (availWPrint) / domW; 
+            const scaleFactor = cWidth / domW; 
             const printGap = gapPixelsRaw * scaleFactor;
             
             const targetGridRatio = Cols / (Rows * targetCellRatio);
