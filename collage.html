@@ -287,608 +287,545 @@
     <input type="file" id="imageInput" class="hidden-input" accept="image/*" multiple>
 
     <script>
-        // DOM Definitions
-        const wrapper = document.getElementById('collageWrapper');
-        const inpWidth = document.getElementById('inpWidth');
-        const inpHeight = document.getElementById('inpHeight');
-        const inpBorder = document.getElementById('inpBorder');
-        const inpGap = document.getElementById('inpGap');
-        
-        const inpCount = document.getElementById('inpCount');
-        const countDisplay = document.getElementById('photoCountDisplay');
+        // ─── DOM References ───────────────────────────────────────────────────────────
+        const wrapper     = document.getElementById('collageWrapper');
+        const inpWidth    = document.getElementById('inpWidth');
+        const inpHeight   = document.getElementById('inpHeight');
+        const inpBorder   = document.getElementById('inpBorder');
+        const inpGap      = document.getElementById('inpGap');
+        const inpCount    = document.getElementById('inpCount');
+        const countDisplay= document.getElementById('photoCountDisplay');
         const btnRegenerate = document.getElementById('btnRegenerate');
-
         const chkUseOrientation = document.getElementById('chkUseOrientation');
-        const orientationRow = document.getElementById('orientationRow');
+        const orientationRow    = document.getElementById('orientationRow');
         const inpPortraits = document.getElementById('inpPortraits');
-        const inpSquares = document.getElementById('inpSquares');
+        const inpSquares   = document.getElementById('inpSquares');
+        const fileInput    = document.getElementById('imageInput');
 
-        const fileInput = document.getElementById('imageInput');
-
-        // Abstract State Store
-        let currentMode = 'swap';
-        let currentLayout = null;
-        let cellData = {}; 
-        let globalBgImageDataUrl = null;
+        // ─── State ────────────────────────────────────────────────────────────────────
+        let currentMode   = 'swap';
+        let currentLayout = null;   // { rows: [[{id,ratio},...], ...], largeRows: [[...]], K, borderPx, gapPx, wrapW, wrapH }
+        let cellData      = {};     // id → { dataUrl, img, offsetX, offsetY }
         let globalBgImageObj = null;
-
-        // Interaction State Store
-        let targetAutoFillCellId = null; 
+        let targetAutoFillCellId = null;
         let draggedCellId = null;
         let isPanning = false, panCellId = null;
-        let startPanX = 0, startPanY = 0;
-        let initOffsetX = 0, initOffsetY = 0;
+        let startPanX = 0, startPanY = 0, initOffsetX = 0, initOffsetY = 0;
 
+        // ─── Init ─────────────────────────────────────────────────────────────────────
         function init() {
-            updateSizing();
-            generateLayoutTree();
             setupEventListeners();
+            generateAndRender();
         }
 
-        // --- Layout Processing Functions ---
-        function updateSizing() {
+        // ─── Core: assign aspect ratios ──────────────────────────────────────────────
+        function getPhotoRatios(N) {
+            const use = chkUseOrientation.checked;
+            let P = parseInt(inpPortraits.value) || 0;
+            let S = parseInt(inpSquares.value)   || 0;
+            if (P + S > N) { let sc = N/(P+S); P = Math.round(P*sc); S = Math.round(S*sc); }
+            let L = N - P - S; if (L < 0) L = 0;
+            let arr = [];
+            for (let i=0;i<P;i++) arr.push(0.75);   // portrait 3:4
+            for (let i=0;i<S;i++) arr.push(1.0);    // square
+            for (let i=0;i<L;i++) arr.push(4/3);    // landscape
+            if (!use) { arr = []; for (let i=0;i<N;i++) arr.push(Math.random()<0.85?0.75:1.0); }
+            // shuffle
+            for (let i=arr.length-1;i>0;i--){ let j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]]; }
+            return arr;
+        }
+
+        // ─── Core: pack ratios into justified rows ───────────────────────────────────
+        // targetRatioSum = how wide (in ratio units) each row should be
+        function packRows(ratios, targetRatioSum) {
+            let rows = [];
+            let current = [];
+            let sum = 0;
+            for (let r of ratios) {
+                if (sum > 0 && sum + r > targetRatioSum * 1.3) {
+                    // close row if adding would overshoot by >30%
+                    if (Math.abs(sum - targetRatioSum) < Math.abs(sum + r - targetRatioSum)) {
+                        rows.push(current); current = [r]; sum = r; continue;
+                    }
+                }
+                current.push(r); sum += r;
+                if (sum >= targetRatioSum * 0.85) { rows.push(current); current = []; sum = 0; }
+            }
+            if (current.length) rows.push(current);
+            return rows;
+        }
+
+        // ─── Core: generate layout ────────────────────────────────────────────────────
+        function generateAndRender() {
+            const N = Math.max(1, parseInt(inpCount.value) || 29);
+            const K = Math.max(0, Math.min(4, parseInt(document.getElementById('inpCenterLg').value) || 0));
+            const Wdoc = parseFloat(inpWidth.value)  || 30;
+            const Hdoc = parseFloat(inpHeight.value) || 20;
+            const canvasAspect = Wdoc / Hdoc;
+
+            // Border: applied as padding on wrapper element
             const borderInches = parseFloat(inpBorder.value) || 0;
+            const gapPx = parseFloat(inpGap.value) || 5;
+
+            // Update display values
             document.getElementById('valBorder').innerText = `${borderInches}"`;
-            const gap = parseFloat(inpGap.value) || 0;
-            document.getElementById('valGap').innerText = `${gap}px`;
-            
-            const W = parseFloat(inpWidth.value) || 30;
-            const view = document.querySelector('.main-view');
-            const borderPx = 20 + (borderInches / W) * view.clientWidth;
-            view.style.padding = `${borderPx}px`;
+            document.getElementById('valGap').innerText    = `${gapPx}px`;
 
-            generateLayoutTree();
-        }
-
-        function generateLayoutTree() {
-            const N = parseInt(inpCount.value) || 29;
-            const W_canvas = parseFloat(inpWidth.value) || 30;
-            const H_canvas = parseFloat(inpHeight.value) || 20;
-
-            const useOrient = chkUseOrientation.checked;
-            let targetP = parseInt(inpPortraits.value) || 0;
-            let targetL = parseInt(inpSquares.value) || 0;
-            if (targetP + targetL > N) {
-                let scale = N / (targetP + targetL);
-                targetP = Math.round(targetP * scale);
-                targetL = Math.round(targetL * scale);
-            }
-            
-            let ratios = [];
-            for (let i = 0; i < N; i++) {
-                if (useOrient) {
-                    if (i < targetP) ratios.push(0.75);      // Portrait 3:4
-                    else if (i < targetP + targetL) ratios.push(1.0); // Square 1:1
-                    else ratios.push(0.75); // overflow → portrait
-                } else {
-                    ratios.push(Math.random() < 0.85 ? 0.75 : 1.0); 
-                }
-            }
-            // Scramble aspects dynamically
-            ratios.sort(() => Math.random() - 0.5); 
-            
-            // Randomize visual source data DOM tracking to legitimately alter position placements!
-            let idList = Array.from({length: N}, (_, i) => i + 1);
-            idList.sort(() => Math.random() - 0.5);
-            
-            let S_total = ratios.reduce((a,b) => a+b, 0);
-            
-            // Predict Rows for closest grid
-            let init_R = Math.round(Math.sqrt(S_total * (H_canvas / W_canvas)));
-            if (init_R < 1) init_R = 1;
-            if (init_R > N) init_R = N;
-            
-            const K = parseInt(document.getElementById('inpCenterLg').value) || 0;
-            
-            // Optimization loop mapping target partitioning for EXACT height fits evaluating options -1 to +1
-            let bestRows = [];
-            let bestStretchError = Infinity;
-            
-            for(let R = Math.max(1, init_R - 1); R <= Math.min(N, init_R + 1); R++) {
-                let targetSums = [];
-                if (K > 0 && R >= 3) {
-                    let mid = Math.floor(R / 2);
-                    let M_normal = S_total / (R - 0.5);
-                    let M_center = M_normal * 0.5; 
-                    for (let i=0; i<R; i++) {
-                        if (i === mid) targetSums.push(M_center);
-                        else targetSums.push(M_normal);
-                    }
-                } else {
-                    for (let i=0; i<R; i++) targetSums.push(S_total / R);
-                }
-                
-                let tempRows = Array.from({length: R}, () => []);
-                let cIdx = 0;
-                for (let i=0; i<R; i++) {
-                    let cTarget = targetSums[i];
-                    let cSum = 0;
-                    while (cIdx < N) {
-                        let nR = ratios[cIdx];
-                        if (cSum + nR > cTarget) {
-                            let diffB = Math.abs(cTarget - cSum);
-                            let diffA = Math.abs(cTarget - (cSum + nR));
-                            if (diffA < diffB && i !== R - 1) {
-                                tempRows[i].push(nR); cSum += nR; cIdx++;
-                            }
-                            break;
-                        } else {
-                            tempRows[i].push(nR); cSum += nR; cIdx++;
-                        }
-                    }
-                    if (tempRows[i].length === 0 && cIdx < N) { tempRows[i].push(ratios[cIdx]); cIdx++; }
-                }
-                while (cIdx < N) { tempRows[R-1].push(ratios[cIdx]); cIdx++; }
-                tempRows = tempRows.filter(r => r.length > 0);
-                
-                // Track geometric deviation scaling perfectly against 30x20 math
-                let rawHeight = 0;
-                for(let row of tempRows) rawHeight += 1.0 / row.reduce((a,b)=>a+b, 0);
-                let aspectErr = Math.abs( (W_canvas * rawHeight) - H_canvas );
-                
-                if (aspectErr < bestStretchError) {
-                    bestStretchError = aspectErr;
-                    bestRows = tempRows;
-                }
-            }
-            
-            let elements = [];
-            let idCounter = 0;
-            for (let r=0; r<bestRows.length; r++) {
-                for (let c=0; c<bestRows[r].length; c++) {
-                    elements.push({ id: idList[idCounter++], r: r, c: c, ratio: bestRows[r][c] });
-                }
-            }
-            
-            currentLayout = { elements, rows: bestRows };
-            renderTreeToView();
-        }
-
-        function renderTreeToView() {
-            if (!currentLayout) return;
-            const { elements, rows } = currentLayout;
-            
+            // Measure available viewport space
             const mainView = document.querySelector('.main-view');
-            const style = getComputedStyle(mainView);
-            const availW = mainView.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-            const availH = mainView.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
-            const gapPx = parseFloat(inpGap.value) || 0;
-            
-            let totalH_when_fullW = 0;
-            let rowHeights_fullW = [];
-            for (let row of rows) {
-                let gapsX = gapPx * (row.length - 1);
-                let h = Math.max(1, (availW - gapsX) / row.reduce((a,b)=>a+b, 0));
-                rowHeights_fullW.push(h);
-                totalH_when_fullW += h;
+            mainView.style.padding = '40px'; // fixed comfortable margin
+            const viewW = mainView.clientWidth  - 80;
+            const viewH = mainView.clientHeight - 80;
+
+            // Fit canvas to viewport maintaining aspect ratio
+            let wrapW, wrapH;
+            if (viewW / viewH > canvasAspect) { wrapH = viewH; wrapW = viewH * canvasAspect; }
+            else                              { wrapW = viewW; wrapH = viewW / canvasAspect; }
+
+            // Border in pixels relative to wrapper
+            const borderFrac  = borderInches / Wdoc;
+            const borderPx    = Math.round(borderFrac * wrapW);
+
+            // Inner drawable area (inside border)
+            const innerW = wrapW - 2 * borderPx;
+            const innerH = wrapH - 2 * borderPx;
+
+            // Get photo ratios
+            const allRatios = getPhotoRatios(N);
+
+            // Separate: first K are large (center), rest are small
+            const largeRatios = allRatios.slice(0, K);
+            const smallRatios = allRatios.slice(K);
+
+            // How many ratio-unit columns fit across inner width?
+            // For small rows: target ratio sum ≈ innerW / smallCellH
+            // We want roughly sqrt(N * canvasAspect) rows
+            const nSmall = smallRatios.length;
+            let targetRowH_small = 0;
+            let smallRows = [];
+
+            if (nSmall > 0) {
+                // Estimate a good target ratio sum per row
+                // naturalH = innerW / sum_of_ratios_in_row
+                // We want: nRows * naturalH + (nRows-1)*gap ≈ innerH (if no large photos)
+                // approximate: nRows ≈ sqrt(nSmall / canvasAspect)
+                const nRowsEst = Math.max(1, Math.round(Math.sqrt(nSmall / canvasAspect)));
+                const targetRatioSum = smallRatios.reduce((a,b)=>a+b,0) / nRowsEst;
+                smallRows = packRows(smallRatios, targetRatioSum);
             }
-            totalH_when_fullW += gapPx * (rows.length - 1);
-            
-            // To absolutely eradicate massive black gaps vertically, stretch seamlessly matching canvas box identical to print
-            let stretchFactor = availH / totalH_when_fullW;
-            
-            wrapper.style.width = `${availW}px`;
-            wrapper.style.height = `${availH}px`;
-            wrapper.style.padding = '0';
-            wrapper.style.gap = `${gapPx * stretchFactor}px`;
-            wrapper.innerHTML = '';
-            
-            let eIdx = 0;
-            for (let r=0; r<rows.length; r++) {
-                let rowDiv = document.createElement('div');
-                rowDiv.style.display = 'flex';
-                rowDiv.style.flexDirection = 'row';
-                rowDiv.style.gap = `${gapPx}px`; // horizontal gaps unchanged
-                rowDiv.style.width = '100%';
-                
-                let rowH = rowHeights_fullW[r] * stretchFactor; // dynamically vertically stretch resolving height bounds gracefully
-                rowDiv.style.height = `${rowH}px`;
-                
-                for (let c=0; c<rows[r].length; c++) {
-                    let el = elements[eIdx++];
-                    let div = document.createElement('div');
-                    div.className = 'cell';
-                    div.dataset.id = el.id;
-                    div.innerHTML = `<div class="placeholder">Click<br>Slot</div><img id="img-${el.id}">`;
-                    
-                    let cellW = rowHeights_fullW[r] * el.ratio; // natural width
-                    div.style.width = `${cellW}px`;
-                    div.style.height = '100%';
-                    // Absorb flex decimal rounding residuals
-                    if (c === rows[r].length - 1) div.style.flexGrow = '1';
-                    
-                    attachCellFeatures(div, el.id);
-                    updateCellDOM(el.id, div);
-                    rowDiv.appendChild(div);
+
+            // Large center row: all K large photos in one thick row
+            let largeRow = largeRatios; // all in one row
+
+            // Now compute row heights so total fills innerH exactly
+            // Heights are proportional to: h_row = innerW / rowRatioSum
+            // Then we scale all heights uniformly to fill innerH
+
+            const allPhotoRows = [];
+            let largeBandIdx = -1;
+            if (K > 0 && smallRows.length >= 2) {
+                largeBandIdx = Math.floor(smallRows.length / 2);
+                for (let i=0; i<smallRows.length; i++) {
+                    allPhotoRows.push({ ratios: smallRows[i], isLarge: false });
+                    if (i === largeBandIdx - 1) {
+                        allPhotoRows.push({ ratios: largeRow, isLarge: true });
+                    }
                 }
-                wrapper.appendChild(rowDiv);
+            } else if (K > 0) {
+                // Not enough small rows: large band at top, small below
+                allPhotoRows.push({ ratios: largeRow, isLarge: true });
+                for (let row of smallRows) allPhotoRows.push({ ratios: row, isLarge: false });
+            } else {
+                for (let row of smallRows) allPhotoRows.push({ ratios: row, isLarge: false });
             }
-            
+
+            // Compute natural heights (when stretched to innerW)
+            // naturalH[i] = innerW / sum(ratios[i])
+            // Then scale all by factor so sum(naturalH) + gaps = innerH
+            const nRows = allPhotoRows.length;
+            const totalGapY = gapPx * (nRows - 1);
+            let naturalHeights = allPhotoRows.map(row => {
+                const sum = row.ratios.reduce((a,b)=>a+b, 0);
+                return sum > 0 ? innerW / sum : 0;
+            });
+
+            // Large rows naturally are taller (fewer photos). Make them even taller by 2x if K>0
+            if (K > 0) {
+                for (let i=0; i<allPhotoRows.length; i++) {
+                    if (allPhotoRows[i].isLarge) naturalHeights[i] *= 2;
+                }
+            }
+
+            const totalNatural = naturalHeights.reduce((a,b)=>a+b,0);
+            const stretchFactor = (innerH - totalGapY) / totalNatural;
+            const rowHeights = naturalHeights.map(h => h * stretchFactor);
+
+            // Build flat element list with sequential IDs
+            let idCounter = 1;
+            const flatRows = allPhotoRows.map((row, ri) => ({
+                ratios: row.ratios,
+                height: rowHeights[ri],
+                isLarge: row.isLarge,
+                cells: row.ratios.map(ratio => ({ id: idCounter++, ratio }))
+            }));
+
+            currentLayout = { flatRows, borderPx, gapPx, wrapW, wrapH, innerW, innerH, K,
+                              Wdoc, Hdoc };
+            renderLayout();
+        }
+
+        // ─── Core: render layout to DOM ───────────────────────────────────────────────
+        function renderLayout() {
+            if (!currentLayout) return;
+            const { flatRows, borderPx, gapPx, wrapW, wrapH, innerW } = currentLayout;
+
+            // Size the wrapper (canvas)
+            wrapper.style.width    = `${wrapW}px`;
+            wrapper.style.height   = `${wrapH}px`;
+            wrapper.style.padding  = `${borderPx}px`;
+            wrapper.style.boxSizing = 'border-box';
+            wrapper.style.display  = 'flex';
+            wrapper.style.flexDirection = 'column';
+            wrapper.style.gap      = `${gapPx}px`;
+            wrapper.innerHTML = '';
+
+            for (const row of flatRows) {
+                const rowEl = document.createElement('div');
+                rowEl.style.cssText = [
+                    'display:flex',
+                    'flex-direction:row',
+                    `gap:${gapPx}px`,
+                    `height:${row.height}px`,
+                    'flex-shrink:0',
+                    'width:100%',
+                    'overflow:hidden'
+                ].join(';');
+
+                for (let ci = 0; ci < row.cells.length; ci++) {
+                    const cell = row.cells[ci];
+                    const div = document.createElement('div');
+                    div.className = 'cell';
+                    div.dataset.id = cell.id;
+
+                    // Width = height * ratio; last cell uses flex:1 to absorb rounding
+                    const cellW = row.height * cell.ratio;
+                    div.style.cssText = [
+                        `width:${cellW}px`,
+                        'height:100%',
+                        'flex-shrink:0',
+                        'overflow:hidden',
+                        'position:relative'
+                    ].join(';');
+                    if (ci === row.cells.length - 1) {
+                        div.style.flex = '1 0 auto';
+                    }
+
+                    div.innerHTML = `<div class="placeholder">Click<br>Slot</div><img id="img-${cell.id}">`;
+                    attachCellFeatures(div, cell.id);
+                    updateCellDOM(cell.id, div);
+                    rowEl.appendChild(div);
+                }
+                wrapper.appendChild(rowEl);
+            }
+
             setMode(currentMode);
         }
 
-        // --- User Interaction Listeners ---
+        // ─── Cell Interaction ─────────────────────────────────────────────────────────
         function attachCellFeatures(cell, id) {
-            cell.addEventListener('mousedown', (e) => {
+            cell.addEventListener('mousedown', e => {
                 if (currentMode === 'pan' && cellData[id] && e.button === 0) {
-                    isPanning = true;
-                    panCellId = id;
-                    startPanX = e.clientX;
-                    startPanY = e.clientY;
-                    initOffsetX = cellData[id].offsetX;
-                    initOffsetY = cellData[id].offsetY;
-                    cell.classList.add('panning');
-                    e.preventDefault(); 
+                    isPanning = true; panCellId = id;
+                    startPanX = e.clientX; startPanY = e.clientY;
+                    initOffsetX = cellData[id].offsetX; initOffsetY = cellData[id].offsetY;
+                    cell.classList.add('panning'); e.preventDefault();
                 }
             });
-
             cell.addEventListener('click', () => {
                 if (!cellData[id] || targetAutoFillCellId === id) {
                     targetAutoFillCellId = id; fileInput.click();
                 }
             });
-
-            cell.addEventListener('dragover', (e) => {
+            cell.addEventListener('dragover', e => {
                 if (currentMode !== 'swap') return;
-                e.preventDefault(); 
+                e.preventDefault();
                 if (draggedCellId && draggedCellId != id) cell.classList.add('drag-over');
             });
-
             cell.addEventListener('dragleave', () => cell.classList.remove('drag-over'));
-
-            cell.addEventListener('dragstart', (e) => {
+            cell.addEventListener('dragstart', e => {
                 if (currentMode !== 'swap' || !cellData[id]) { e.preventDefault(); return; }
-                draggedCellId = id;
-                cell.classList.add('dragging');
+                draggedCellId = id; cell.classList.add('dragging');
                 e.dataTransfer.effectAllowed = 'move';
                 e.dataTransfer.setData('text/plain', id);
             });
-
-            cell.addEventListener('dragend', () => {
-                cell.classList.remove('dragging');
-                draggedCellId = null;
-            });
-
-            cell.addEventListener('drop', (e) => {
+            cell.addEventListener('dragend', () => { cell.classList.remove('dragging'); draggedCellId = null; });
+            cell.addEventListener('drop', e => {
                 if (currentMode !== 'swap') return;
-                e.preventDefault();
-                cell.classList.remove('drag-over');
+                e.preventDefault(); cell.classList.remove('drag-over');
                 if (draggedCellId && draggedCellId != id) swapCells(draggedCellId, id);
+            });
+        }
+
+        function swapCells(idA, idB) {
+            [cellData[idA], cellData[idB]] = [cellData[idB], cellData[idA]];
+            updateCellDOM(idA); updateCellDOM(idB);
+        }
+
+        function updateCellDOM(id, cellOverride = null) {
+            const cell = cellOverride || document.querySelector(`.cell[data-id="${id}"]`);
+            if (!cell) return;
+            const img = cell.querySelector('img');
+            const ph  = cell.querySelector('.placeholder');
+            if (cellData[id]) {
+                img.src = cellData[id].dataUrl;
+                img.style.objectPosition = `${cellData[id].offsetX}% ${cellData[id].offsetY}%`;
+                img.style.display = 'block';
+                if (ph) ph.style.display = 'none';
+                if (currentMode === 'swap') cell.draggable = true;
+            } else {
+                img.style.display = 'none';
+                img.src = '';
+                if (ph) ph.style.display = '';
+                cell.draggable = false;
+            }
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.body.dataset.mode = mode;
+            document.getElementById('modeSwapBtn').classList.toggle('active', mode === 'swap');
+            document.getElementById('modePanBtn').classList.toggle('active',  mode === 'pan');
+            document.querySelectorAll('.cell').forEach(c => {
+                c.draggable = (mode === 'swap' && cellData[c.dataset.id]) ? true : false;
             });
         }
 
         function updateOrientationsInput() {
             const N = parseInt(inpCount.value) || 1;
             const K = parseInt(document.getElementById('inpCenterLg').value) || 0;
-            const effective = Math.max(1, N - K);
+            const eff = Math.max(1, N - K);
             let p = parseInt(inpPortraits.value) || 0;
-            if (p > effective) p = effective;
+            if (p > eff) p = eff;
             inpPortraits.value = p;
-            inpSquares.value = effective - p;
+            inpSquares.value = eff - p;
         }
 
+        // ─── File Loading ─────────────────────────────────────────────────────────────
+        const loadFileToCell = (file, cellId) => new Promise(resolve => {
+            const reader = new FileReader();
+            reader.onload = ev => {
+                const img = new Image();
+                img.onload = () => {
+                    cellData[cellId] = { dataUrl: ev.target.result, img, offsetX: 50, offsetY: 50 };
+                    updateCellDOM(cellId);
+                    resolve();
+                };
+                img.src = ev.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // ─── High-Res Export ──────────────────────────────────────────────────────────
+        function generateHighResCanvas() {
+            if (!currentLayout) return;
+            const { flatRows, borderPx, gapPx, wrapW, wrapH, innerW, innerH, Wdoc, Hdoc } = currentLayout;
+            const DPI   = 300;
+            const cW    = Wdoc * DPI;
+            const cH    = Hdoc * DPI;
+            const scale = cW / wrapW;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = cW; canvas.height = cH;
+            const ctx = canvas.getContext('2d', { alpha: false });
+            ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-color').trim() || '#000';
+            ctx.fillRect(0, 0, cW, cH);
+            if (globalBgImageObj) drawCover(ctx, globalBgImageObj, 0, 0, cW, cH, 50, 50);
+
+            const sBorder = borderPx * scale;
+            const sGap    = gapPx * scale;
+            let curY = sBorder;
+            for (const row of flatRows) {
+                const rowH = row.height * scale;
+                let curX = sBorder;
+                const totalGapX = sGap * (row.cells.length - 1);
+                const availW    = (innerW * scale) - totalGapX;
+                const sumRatios = row.cells.reduce((a,c)=>a+c.ratio, 0);
+
+                for (let ci=0; ci<row.cells.length; ci++) {
+                    const cell  = row.cells[ci];
+                    let cellW   = (cell.ratio / sumRatios) * availW;
+                    if (ci === row.cells.length - 1) cellW = (sBorder + innerW*scale) - curX;
+                    if (cellData[cell.id]) {
+                        const cd = cellData[cell.id];
+                        drawCover(ctx, cd.img, curX, curY, cellW, rowH, cd.offsetX, cd.offsetY);
+                    } else {
+                        ctx.fillStyle = '#222'; ctx.fillRect(curX, curY, cellW, rowH);
+                    }
+                    curX += cellW + sGap;
+                }
+                curY += rowH + sGap;
+            }
+
+            try {
+                const url = canvas.toDataURL('image/jpeg', 0.95);
+                const a = document.createElement('a');
+                a.download = `Collage-${Wdoc}x${Hdoc}-Print.jpg`;
+                a.href = url;
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            } catch(e) { alert('Export failed — try reducing dimensions.'); }
+        }
+
+        function drawCover(ctx, img, x, y, w, h, ox=50, oy=50) {
+            if (w <= 0 || h <= 0) return;
+            const ir = img.width / img.height, tr = w / h;
+            let sw, sh, sx, sy;
+            if (ir > tr) { sh = img.height; sw = sh * tr; sx = (img.width - sw) * (ox/100); sy = 0; }
+            else         { sw = img.width;  sh = sw / tr; sx = 0; sy = (img.height - sh) * (oy/100); }
+            ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+        }
+
+        // ─── Event Listeners ──────────────────────────────────────────────────────────
         function setupEventListeners() {
-            ['input', 'change'].forEach(evt => {
-                // updateSizing already calls generateLayoutTree — don't double-call
-                inpWidth.addEventListener(evt, updateSizing);
-                inpHeight.addEventListener(evt, updateSizing);
-                inpBorder.addEventListener(evt, updateSizing);
-                inpGap.addEventListener(evt, updateSizing);
+            // Dimension changes
+            ['input','change'].forEach(evt => {
+                inpWidth.addEventListener(evt,  generateAndRender);
+                inpHeight.addEventListener(evt, generateAndRender);
+                inpBorder.addEventListener(evt, generateAndRender);
+                inpGap.addEventListener(evt,    generateAndRender);
             });
+
             document.getElementById('btnRotate').addEventListener('click', () => {
-                let w = inpWidth.value;
-                inpWidth.value = inpHeight.value;
-                inpHeight.value = w;
-                updateSizing(); generateLayoutTree();
+                [inpWidth.value, inpHeight.value] = [inpHeight.value, inpWidth.value];
+                generateAndRender();
             });
-            
-            window.addEventListener('resize', updateSizing);
-            
+
+            window.addEventListener('resize', generateAndRender);
+
+            // Photo count
+            inpCount.addEventListener('input', () => {
+                countDisplay.innerText = inpCount.value;
+                if (chkUseOrientation.checked) updateOrientationsInput();
+            });
+            inpCount.addEventListener('change', generateAndRender);
+
+            // Center large focus
             const inpCenterLg = document.getElementById('inpCenterLg');
             const valCenterLg = document.getElementById('valCenterLg');
             inpCenterLg.addEventListener('input', () => {
-                let k = parseInt(inpCenterLg.value) || 0;
+                const k = parseInt(inpCenterLg.value) || 0;
                 valCenterLg.innerText = k;
                 if (k > 0) {
-                    let minCount = k + 4;
+                    const minCount = k + 2;
                     if (parseInt(inpCount.value) < minCount) {
-                        inpCount.value = minCount;
-                        countDisplay.innerText = minCount;
+                        inpCount.value = minCount; countDisplay.innerText = minCount;
                     }
                     inpCount.min = minCount;
-                } else {
-                    inpCount.min = 1;
-                }
-                if(chkUseOrientation.checked) updateOrientationsInput();
+                } else { inpCount.min = 1; }
+                if (chkUseOrientation.checked) updateOrientationsInput();
             });
-            inpCenterLg.addEventListener('change', generateLayoutTree);
+            inpCenterLg.addEventListener('change', generateAndRender);
 
-            inpCount.addEventListener('input', () => { 
-                countDisplay.innerText = inpCount.value;
-                if(chkUseOrientation.checked) updateOrientationsInput();
-            });
-            inpCount.addEventListener('change', generateLayoutTree);
-            btnRegenerate.addEventListener('click', generateLayoutTree);
+            // Randomize button
+            btnRegenerate.addEventListener('click', generateAndRender);
 
-            chkUseOrientation.addEventListener('change', (e) => {
-                orientationRow.style.opacity = e.target.checked ? '1' : '0.3';
-                orientationRow.style.pointerEvents = e.target.checked ? 'auto' : 'none';
-                if(e.target.checked) updateOrientationsInput();
-                generateLayoutTree();
+            // Orientation toggle
+            chkUseOrientation.addEventListener('change', e => {
+                orientationRow.style.opacity      = e.target.checked ? '1' : '0.3';
+                orientationRow.style.pointerEvents= e.target.checked ? 'auto' : 'none';
+                if (e.target.checked) updateOrientationsInput();
+                generateAndRender();
             });
 
             inpPortraits.addEventListener('input', () => {
                 const N = parseInt(inpCount.value);
-                let p = parseInt(inpPortraits.value) || 0;
-                if(p > N) p = N;
-                inpPortraits.value = p;
-                inpSquares.value = N - p;
+                let p = Math.min(parseInt(inpPortraits.value)||0, N);
+                inpPortraits.value = p; inpSquares.value = N - p;
             });
-            inpPortraits.addEventListener('change', generateLayoutTree);
+            inpPortraits.addEventListener('change', generateAndRender);
 
             inpSquares.addEventListener('input', () => {
                 const N = parseInt(inpCount.value);
-                let l = parseInt(inpSquares.value) || 0;
-                if(l > N) l = N;
-                inpSquares.value = l;
-                inpPortraits.value = N - l;
+                let s = Math.min(parseInt(inpSquares.value)||0, N);
+                inpSquares.value = s; inpPortraits.value = N - s;
             });
-            inpSquares.addEventListener('change', generateLayoutTree);
+            inpSquares.addEventListener('change', generateAndRender);
 
-            document.getElementById('inpBgColor').addEventListener('input', (e) => { 
-                document.documentElement.style.setProperty('--bg-color', e.target.value); 
+            // Background colour
+            document.getElementById('inpBgColor').addEventListener('input', e => {
+                document.documentElement.style.setProperty('--bg-color', e.target.value);
             });
 
-            document.getElementById('inpBgImg').addEventListener('change', (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
+            // Background image
+            document.getElementById('inpBgImg').addEventListener('change', e => {
+                const file = e.target.files[0]; if (!file) return;
                 const r = new FileReader();
-                r.onload = (ev) => {
-                    globalBgImageDataUrl = ev.target.result;
+                r.onload = ev => {
                     globalBgImageObj = new Image();
                     globalBgImageObj.onload = () => {
-                        wrapper.style.backgroundImage = `url(${globalBgImageDataUrl})`;
+                        wrapper.style.backgroundImage = `url(${ev.target.result})`;
                     };
-                    globalBgImageObj.src = globalBgImageDataUrl;
+                    globalBgImageObj.src = ev.target.result;
                 };
                 r.readAsDataURL(file);
             });
 
+            // Mode buttons
             document.getElementById('modeSwapBtn').addEventListener('click', () => setMode('swap'));
-            document.getElementById('modePanBtn').addEventListener('click', () => setMode('pan'));
+            document.getElementById('modePanBtn').addEventListener('click',  () => setMode('pan'));
 
+            // Upload folder button
             document.getElementById('btnUpload').addEventListener('click', () => {
                 targetAutoFillCellId = null; fileInput.click();
             });
 
-            fileInput.addEventListener('change', async function(e) {
+            // File input: fill cells in order
+            fileInput.addEventListener('change', async e => {
                 const files = Array.from(e.target.files);
-                if (files.length === 0) return;
-                
-                // Use currentLayout.elements (new row-based API) instead of old treeRoot
-                if (!currentLayout || !currentLayout.elements) return;
-                const allIds = currentLayout.elements.map(el => el.id);
+                if (!files.length || !currentLayout) return;
 
+                const allIds = currentLayout.flatRows.flatMap(row => row.cells.map(c => c.id));
                 let fillOrder = allIds;
                 if (targetAutoFillCellId) {
                     const si = fillOrder.indexOf(parseInt(targetAutoFillCellId));
                     if (si > -1) fillOrder = [...fillOrder.slice(si), ...fillOrder.slice(0, si)];
                 }
-
-                const emptyIds = fillOrder.filter(id => !cellData[id]);
+                const emptyIds   = fillOrder.filter(id => !cellData[id]);
                 const targetCells = emptyIds.length > 0 ? emptyIds : fillOrder;
-
-                let fileIndex = 0;
-                for (let i = 0; i < targetCells.length && fileIndex < files.length; i++) {
-                    await loadFileToCell(files[fileIndex], targetCells[i]);
-                    fileIndex++;
+                let fi = 0;
+                for (let i=0; i<targetCells.length && fi<files.length; i++, fi++) {
+                    await loadFileToCell(files[fi], targetCells[i]);
                 }
-                fileInput.value = ''; 
-                targetAutoFillCellId = null;
+                fileInput.value = ''; targetAutoFillCellId = null;
             });
 
-            window.addEventListener('mousemove', (e) => {
+            // Pan
+            window.addEventListener('mousemove', e => {
                 if (!isPanning || currentMode !== 'pan') return;
                 const cell = document.querySelector(`.cell[data-id="${panCellId}"]`);
-                if(!cell) return;
+                if (!cell) return;
                 const rect = cell.getBoundingClientRect();
-                
-                // Native reverse mapped mapping mapping relative mouse distance perfectly dynamically 
-                const deltaX = -((e.clientX - startPanX) / rect.width) * 100;
-                const deltaY = -((e.clientY - startPanY) / rect.height) * 100;
-                
-                let newX = Math.max(0, Math.min(100, initOffsetX + deltaX));
-                let newY = Math.max(0, Math.min(100, initOffsetY + deltaY));
-                
-                cellData[panCellId].offsetX = newX;
-                cellData[panCellId].offsetY = newY;
-                cell.querySelector('img').style.objectPosition = `${newX}% ${newY}%`;
+                const dx = -((e.clientX - startPanX) / rect.width)  * 100;
+                const dy = -((e.clientY - startPanY) / rect.height) * 100;
+                let nx = Math.max(0, Math.min(100, initOffsetX + dx));
+                let ny = Math.max(0, Math.min(100, initOffsetY + dy));
+                cellData[panCellId].offsetX = nx; cellData[panCellId].offsetY = ny;
+                cell.querySelector('img').style.objectPosition = `${nx}% ${ny}%`;
             });
-
             window.addEventListener('mouseup', () => {
                 if (isPanning) {
                     const c = document.querySelector(`.cell[data-id="${panCellId}"]`);
-                    if(c) c.classList.remove('panning');
+                    if (c) c.classList.remove('panning');
                     isPanning = false; panCellId = null;
                 }
             });
 
+            // Download
             document.getElementById('btnDownload').addEventListener('click', () => {
                 const btn = document.getElementById('btnDownload');
-                const ogText = btn.innerHTML;
-                btn.innerHTML = 'Rendering 300DPI High-Res...';
-                btn.disabled = true;
-                setTimeout(() => { generateHighResCanvas(); btn.innerHTML = ogText; btn.disabled = false; }, 50);
+                const og = btn.innerHTML;
+                btn.innerHTML = 'Rendering 300 DPI…'; btn.disabled = true;
+                setTimeout(() => { generateHighResCanvas(); btn.innerHTML = og; btn.disabled = false; }, 50);
             });
-        }
-
-        function setMode(mode) {
-            currentMode = mode;
-            document.body.dataset.mode = mode;
-            if (mode === 'swap') {
-                document.getElementById('modeSwapBtn').classList.add('active');
-                document.getElementById('modePanBtn').classList.remove('active');
-            } else {
-                document.getElementById('modePanBtn').classList.add('active');
-                document.getElementById('modeSwapBtn').classList.remove('active');
-            }
-            document.querySelectorAll('.cell').forEach(c => {
-                c.draggable = (mode === 'swap' && cellData[c.dataset.id]) ? true : false;
-            });
-        }
-
-        const loadFileToCell = (file, cellId) => {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const dataUrl = event.target.result;
-                    const imgObj = new Image();
-                    imgObj.onload = () => {
-                        cellData[cellId] = { dataUrl, img: imgObj, offsetX: 50, offsetY: 50 };
-                        updateCellDOM(cellId);
-                        resolve();
-                    };
-                    imgObj.src = dataUrl;
-                };
-                reader.readAsDataURL(file);
-            });
-        };
-
-        function updateCellDOM(id, cellOverride = null) {
-            const cell = cellOverride || document.querySelector(`.cell[data-id="${id}"]`);
-            if(!cell) return;
-            const imgEl = cell.querySelector('img');
-            const placeholder = cell.querySelector('.placeholder');
-            
-            if (cellData[id]) {
-                imgEl.src = cellData[id].dataUrl;
-                imgEl.style.objectPosition = `${cellData[id].offsetX}% ${cellData[id].offsetY}%`;
-                imgEl.style.display = 'block';
-                placeholder.style.display = 'none';
-                if (currentMode === 'swap') cell.draggable = true;
-            } else {
-                imgEl.style.display = 'none';
-                placeholder.style.display = 'block';
-                cell.draggable = false;
-            }
-        }
-
-        function swapCells(idA, idB) {
-            let tempA = cellData[idA] ? { ...cellData[idA] } : null;
-            let tempB = cellData[idB] ? { ...cellData[idB] } : null;
-            if (tempA) cellData[idB] = tempA; else delete cellData[idB];
-            if (tempB) cellData[idA] = tempB; else delete cellData[idA];
-            updateCellDOM(idA); 
-            updateCellDOM(idB);
-        }
-
-        // --- PDF / Print High Res Compiler Strategy ---
-        function generateHighResCanvas() {
-            const DPI = 300; 
-            const W = parseFloat(inpWidth.value) || 30;
-            const H = parseFloat(inpHeight.value) || 20;
-            const cWidth = W * DPI; 
-            const cHeight = H * DPI; 
-
-            const canvas = document.createElement('canvas');
-            canvas.width = cWidth;
-            canvas.height = cHeight;
-            const ctx = canvas.getContext('2d', { alpha: false });
-
-            ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-color').trim() || '#000000';
-            ctx.fillRect(0, 0, cWidth, cHeight);
-            
-            if (globalBgImageObj) {
-                drawObjectFitCover(ctx, globalBgImageObj, 0, 0, cWidth, cHeight, 50, 50);
-            }
-
-            if (!currentLayout) return;
-            const { elements, rows } = currentLayout;
-            
-            const borderInches = parseFloat(inpBorder.value) || 0;
-            const outerPadding = borderInches * DPI; 
-            
-            const availWPrint = cWidth - 2 * outerPadding;
-            const availHPrint = cHeight - 2 * outerPadding;
-            
-            const gapPixelsRaw = parseFloat(inpGap.value) || 0;
-            const gapFraction = gapPixelsRaw / document.querySelector('.main-view').clientWidth;
-            const printGapX = gapFraction * cWidth; 
-
-            let totalH_when_fullW = 0;
-            let rowHeights_fullW = [];
-            for (let row of rows) {
-                let gapsX = printGapX * (row.length - 1);
-                let h = (availWPrint - gapsX) / row.reduce((a,b)=>a+b, 0);
-                rowHeights_fullW.push(h);
-                totalH_when_fullW += h;
-            }
-            
-            let printGapY = printGapX;
-            totalH_when_fullW += printGapY * (rows.length - 1);
-            
-            // Absolutely strictly stretch to resolve vertical canvas black bounding box perfectly!
-            let stretchPrint = availHPrint / totalH_when_fullW;
-            
-            let eIdx = 0;
-            let curY = outerPadding;
-            
-            for (let r=0; r<rows.length; r++) {
-                let curX = outerPadding;
-                let rowH = rowHeights_fullW[r] * stretchPrint;
-                
-                for (let c=0; c<rows[r].length; c++) {
-                    let el = elements[eIdx++];
-                    let cellW = rowHeights_fullW[r] * el.ratio;
-                    
-                    // Flex grow absorption explicitly translated to integer Canvas Math
-                    if (c === rows[r].length - 1) {
-                        cellW = availWPrint - (curX - outerPadding);
-                    }
-                    
-                    if (cellData[el.id]) {
-                        const cd = cellData[el.id];
-                        drawObjectFitCover(ctx, cd.img, curX, curY, cellW, rowH, cd.offsetX, cd.offsetY);
-                    } else {
-                        ctx.fillStyle = '#222222';
-                        ctx.fillRect(curX, curY, cellW, rowH);
-                    }
-                    curX += cellW + printGapX;
-                }
-                curY += rowH + (printGapY * stretchPrint);
-            }
-
-            try {
-                const dataURL = canvas.toDataURL('image/jpeg', 0.95);
-                const link = document.createElement('a');
-                link.download = `HighRes-${W}x${H}-Print.jpg`;
-                link.href = dataURL;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-            } catch (err) {
-                alert('Export memory exceeded. Try scaling down inches slightly or closing background tabs.');
-            }
-        }
-
-        function drawObjectFitCover(ctx, img, x, y, w, h, offsetX=50, offsetY=50) {
-            if (w <= 0 || h <= 0) return;
-            const imgRatio = img.width / img.height;
-            const targetRatio = w / h;
-            let sWidth, sHeight, sx, sy;
-
-            if (imgRatio > targetRatio) {
-                sHeight = img.height;
-                sWidth = img.height * targetRatio;
-                sx = (img.width - sWidth) * (offsetX / 100);
-                sy = 0;
-            } else {
-                sWidth = img.width;
-                sHeight = img.width / targetRatio;
-                sx = 0;
-                sy = (img.height - sHeight) * (offsetY / 100);
-            }
-            ctx.drawImage(img, sx, sy, sWidth, sHeight, x, y, w, h);
         }
 
         init();
