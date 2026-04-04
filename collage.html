@@ -328,18 +328,22 @@
             document.getElementById('valBorder').innerText = `${borderInches}"`;
             const gap = parseFloat(inpGap.value) || 0;
             document.getElementById('valGap').innerText = `${gap}px`;
+            
+            const W = parseFloat(inpWidth.value) || 30;
+            const view = document.querySelector('.main-view');
+            // Scale explicit border proportionally mapping output inches
+            const borderPx = 20 + (borderInches / W) * view.clientWidth;
+            view.style.padding = `${borderPx}px`;
+
             generateLayoutTree();
         }
 
-        // A mathematically perfect CSS Grid implementation eliminating chaotic binary tree gaps
-        // Guarantees all objects abide by exclusively 3:4 portrait or 1:1 square mandates natively.
         function generateLayoutTree() {
             const N = parseInt(inpCount.value) || 29;
-            const W_canvas = parseFloat(inpWidth.value) || 30; // In inches
-            const H_canvas = parseFloat(inpHeight.value) || 20; // In inches
+            const W_canvas = parseFloat(inpWidth.value) || 30; 
+            const H_canvas = parseFloat(inpHeight.value) || 20; 
 
             const K = parseInt(document.getElementById('inpCenterLg').value) || 0;
-            const totalCells = N + 3 * K;
             
             // Baseline mandates 3:4 (0.75) exclusively natively per precise design bounds
             let targetCellRatio = 0.75; 
@@ -351,19 +355,35 @@
             }
             
             let targetGridRatio = (W_canvas / H_canvas) / targetCellRatio;
-            let bestCols = 1, bestRows = totalCells, bestErr = Infinity;
-            
-            for (let c = 1; c <= totalCells; c++) {
-                let r = Math.ceil(totalCells / c);
-                let err = Math.abs((c / r) - targetGridRatio);
-                if (err < bestErr) {
-                    bestErr = err;
-                    bestCols = c; 
-                    bestRows = r;
+            let best = null;
+            let bestErr = Infinity;
+
+            for (let L = K; L <= N / 2 + 1; L++) {
+                let A = N + 3 * L;
+                for (let R = 1; R <= Math.ceil(Math.sqrt(A)); R++) {
+                    if (A % R === 0) {
+                        let C = A / R;
+                        
+                        let err1 = Math.abs((C / R) - targetGridRatio);
+                        if (err1 < bestErr) {
+                            bestErr = err1;
+                            best = { C, R, L, A };
+                        }
+                        
+                        let err2 = Math.abs((R / C) - targetGridRatio);
+                        if (err2 < bestErr) {
+                            bestErr = err2;
+                            best = { C: R, R: C, L, A };
+                        }
+                    }
                 }
             }
             
-            let Cols = bestCols, Rows = bestRows;
+            if (!best) {
+                best = { C: Math.ceil(Math.sqrt(N)), R: Math.ceil(Math.sqrt(N)), L: 0, A: N };
+            }
+            
+            let Cols = best.C, Rows = best.R;
             if (K > 0) {
                 if (Cols < 2) Cols = 2;
                 if (Rows < 2) Rows = 2;
@@ -377,48 +397,80 @@
             if (rCenter < 0) rCenter = 0;
             if (cCenter < 0) cCenter = 0;
             
-            let centerSpots = [];
+            let spots = [];
             for(let r=0; r<Rows-1; r++){
                 for(let c=0; c<Cols-1; c++){
-                    centerSpots.push({r, c, dist: Math.pow(r - rCenter, 2) + Math.pow(c - cCenter, 2)});
+                    spots.push({r, c, dist: Math.pow(r - rCenter, 2) + Math.pow(c - cCenter, 2)});
                 }
             }
-            centerSpots.sort((a,b) => a.dist - b.dist);
+            let centerSpots = [...spots].sort((a,b) => a.dist - b.dist);
             
-            let kPlaced = 0;
+            let lPlaced = 0;
             for (let spot of centerSpots) {
-                if (kPlaced >= K) break;
+                if (lPlaced >= K) break;
                 let {r, c} = spot;
                 if (!grid[r][c] && !grid[r+1][c] && !grid[r][c+1] && !grid[r+1][c+1]) {
                     grid[r][c] = true; grid[r+1][c] = true; grid[r][c+1] = true; grid[r+1][c+1] = true;
-                    elements.push({ id: kPlaced+1, r, c, w: 2, h: 2, isLarge: true });
-                    kPlaced++;
+                    elements.push({ id: lPlaced+1, r, c, w: 2, h: 2, isLarge: true });
+                    lPlaced++;
                 }
             }
             
-            let nPlaced = 0;
+            let scatterSpots = [...spots].sort(() => Math.random() - 0.5);
+            for (let i=0; i<40; i++) {
+                if (lPlaced >= best.L) break;
+                let spot = scatterSpots[i % scatterSpots.length];
+                if (!spot) continue;
+                let {r, c} = spot;
+                if (!grid[r][c] && !grid[r+1][c] && !grid[r][c+1] && !grid[r+1][c+1]) {
+                    grid[r][c] = true; grid[r+1][c] = true; grid[r][c+1] = true; grid[r+1][c+1] = true;
+                    elements.push({ id: lPlaced+1, r, c, w: 2, h: 2, isLarge: true });
+                    lPlaced++;
+                }
+            }
+            for (let spot of spots) {
+                if (lPlaced >= best.L) break;
+                let {r, c} = spot;
+                if (!grid[r][c] && !grid[r+1][c] && !grid[r][c+1] && !grid[r+1][c+1]) {
+                    grid[r][c] = true; grid[r+1][c] = true; grid[r][c+1] = true; grid[r+1][c+1] = true;
+                    elements.push({ id: lPlaced+1, r, c, w: 2, h: 2, isLarge: true });
+                    lPlaced++;
+                }
+            }
+            
+            let smallSpots = [];
             for (let r=0; r<Rows; r++) {
                 for (let c=0; c<Cols; c++) {
-                    if (!grid[r][c] && nPlaced < (N - kPlaced)) {
-                        grid[r][c] = true;
-                        elements.push({ id: K + nPlaced + 1, r, c, w: 1, h: 1, isLarge: false });
-                        nPlaced++;
+                    if (!grid[r][c]) {
+                        smallSpots.push({r, c});
                     }
                 }
+            }
+            
+            // Randomize to dynamically distribute any black hole bounds properly natively guaranteeing symmetry breakdown
+            smallSpots.sort(() => Math.random() - 0.5);
+            
+            let nPlaced = 0;
+            let missingSpotsToFill = N - lPlaced;
+            for (let spot of smallSpots) {
+                if (nPlaced >= missingSpotsToFill) break;
+                elements.push({ id: lPlaced + nPlaced + 1, r: spot.r, c: spot.c, w: 1, h: 1, isLarge: false });
+                nPlaced++;
             }
             
             currentLayout = { elements, Cols, Rows, targetCellRatio };
             renderTreeToView();
         }
 
-        // Generate HTML natively mapping array abstractions directly into CSS Grids
         function renderTreeToView() {
             if (!currentLayout) return;
             const { elements, Cols, Rows, targetCellRatio } = currentLayout;
             
             const mainView = document.querySelector('.main-view');
-            const availW = mainView.clientWidth - 80; 
-            const availH = mainView.clientHeight - 80;
+            const style = getComputedStyle(mainView);
+            const availW = mainView.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+            const availH = mainView.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+            
             const gapPx = parseFloat(inpGap.value) || 0;
             
             let ch1 = (availW - (Cols-1)*gapPx) / (Cols * targetCellRatio);
@@ -436,6 +488,7 @@
             wrapper.style.gridTemplateColumns = `repeat(${Cols}, 1fr)`;
             wrapper.style.gridTemplateRows = `repeat(${Rows}, 1fr)`;
             wrapper.style.gap = `${gapPx}px`;
+            wrapper.style.padding = '0'; // border dynamically inherited
 
             wrapper.innerHTML = '';
             
