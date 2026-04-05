@@ -319,18 +319,25 @@
         }
 
         // ─── Core: assign aspect ratios ──────────────────────────────────────────────
+        // STRICT: only 3:4 portrait (0.75) or 1:1 square (1.0) — never landscape
         function getPhotoRatios(N) {
             const use = chkUseOrientation.checked;
-            let P = parseInt(inpPortraits.value) || 0;
-            let S = parseInt(inpSquares.value)   || 0;
-            if (P + S > N) { let sc = N/(P+S); P = Math.round(P*sc); S = Math.round(S*sc); }
-            let L = N - P - S; if (L < 0) L = 0;
             let arr = [];
-            for (let i=0;i<P;i++) arr.push(0.75);   // portrait 3:4
-            for (let i=0;i<S;i++) arr.push(1.0);    // square
-            for (let i=0;i<L;i++) arr.push(4/3);    // landscape
-            if (!use) { arr = []; for (let i=0;i<N;i++) arr.push(Math.random()<0.85?0.75:1.0); }
-            // shuffle
+            if (use) {
+                let P = parseInt(inpPortraits.value) || 0;
+                let S = parseInt(inpSquares.value)   || 0;
+                // Clamp to N
+                if (P + S > N) { let sc = N/(P+S); P = Math.round(P*sc); S = Math.round(S*sc); }
+                // Any slot not covered by P or S falls back to portrait
+                const leftover = N - P - S;
+                for (let i=0;i<P;i++)        arr.push(0.75); // portrait 3:4
+                for (let i=0;i<S;i++)        arr.push(1.0);  // square 1:1
+                for (let i=0;i<leftover;i++) arr.push(0.75); // overflow → portrait
+            } else {
+                // Default: 85% portrait 3:4, 15% square — never landscape
+                for (let i=0;i<N;i++) arr.push(Math.random() < 0.85 ? 0.75 : 1.0);
+            }
+            // Shuffle
             for (let i=arr.length-1;i>0;i--){ let j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]]; }
             return arr;
         }
