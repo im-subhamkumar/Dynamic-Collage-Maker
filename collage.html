@@ -394,57 +394,85 @@
             const largeRatios = allRatios.slice(0, K);
             const smallRatios = allRatios.slice(K);
 
-            // ── Row packing ─────────────────────────────────────────────────────────
-            // For STRICT ratios, row height h_i = (innerW - gaps_i) / sum(ratios_i)
-            // We want total height ≈ innerH. Solve for best number of rows:
-            // Each row with n_avg photos, sum ≈ n_avg * avgRatio, h ≈ (innerW - n_avg*gap) / (n_avg*avgRatio)
-            // nRows * h ≈ innerH  →  nRows ≈ innerH * n_avg * avgRatio / innerW
-            // Also nRows * n_avg ≈ N  →  n_avg ≈ N / nRows
-            // Combining: nRows^2 ≈ innerH * N * avgRatio / innerW
+            // ── Row packing (OPTIMIZED FOR ZERO GAPS & MINIMAL DISTORTION) ──────────
             const nSmall = smallRatios.length;
-            let smallRows = [];
-            if (nSmall > 0) {
-                const avgRatio = smallRatios.reduce((a,b)=>a+b,0) / nSmall;
-                const nRowsEst = Math.max(1, Math.round(Math.sqrt(innerH * nSmall * avgRatio / innerW)));
-                // Target ratio sum per row = total / nRows
-                const targetRatioSum = smallRatios.reduce((a,b)=>a+b,0) / nRowsEst;
-                smallRows = packRows(smallRatios, targetRatioSum);
-            }
+            let bestRows = [];
+            let bestStretch = Infinity;
+            let bestH = 0;
+            let bestRowHeights = [];
 
-            // ── Assemble all rows ────────────────────────────────────────────────────
-            const allPhotoRows = [];
-            if (K > 0 && smallRows.length >= 1) {
-                const midIdx = Math.floor(smallRows.length / 2);
-                for (let i = 0; i < smallRows.length; i++) {
-                    allPhotoRows.push({ ratios: smallRows[i], isLarge: false });
-                    if (i === midIdx - 1) allPhotoRows.push({ ratios: largeRatios, isLarge: true });
+            // Helper to calc heights given a specific smallRows partition
+            const testLayout = (testSmallRows) => {
+                const testAllRows = [];
+                if (K > 0 && testSmallRows.length >= 1) {
+                    const midIdx = Math.floor(testSmallRows.length / 2);
+                    for (let i = 0; i < testSmallRows.length; i++) {
+                        testAllRows.push({ ratios: testSmallRows[i], isLarge: false });
+                        if (i === midIdx - 1) testAllRows.push({ ratios: largeRatios, isLarge: true });
+                    }
+                    if (midIdx === 0) testAllRows.unshift({ ratios: largeRatios, isLarge: true });
+                } else if (K > 0) {
+                    testAllRows.push({ ratios: largeRatios, isLarge: true });
+                    for (let row of testSmallRows) testAllRows.push({ ratios: row, isLarge: false });
+                } else {
+                    for (let row of testSmallRows) testAllRows.push({ ratios: row, isLarge: false });
                 }
-                // Edge case: if midIdx===0, prepend
-                if (midIdx === 0) allPhotoRows.unshift({ ratios: largeRatios, isLarge: true });
-            } else if (K > 0) {
-                allPhotoRows.push({ ratios: largeRatios, isLarge: true });
-                for (let row of smallRows) allPhotoRows.push({ ratios: row, isLarge: false });
+
+                // Calc natural height: to prevent K=1 from exploding to 400% height, we enforce a MAX height on its row
+                // by using an artificial minimum sum ratio (acting as empty buffer space) to force it to be reasonable.
+                let tempRowH = testAllRows.map(row => {
+                    const n = row.ratios.length || 1;
+                    let sum = row.ratios.reduce((a,b)=>a+b, 0) || 1;
+                    // Prevent large rows from massively exploding vertical boundaries
+                    if (row.isLarge && sum < 1.5) sum = 1.5; 
+                    
+                    const availW = innerW - (n - 1) * gapPx;
+                    let h = availW / sum;
+                    return Math.max(1, h);
+                });
+
+                const tempH = tempRowH.reduce((a,b)=>a+b,0) + gapPx * (testAllRows.length - 1);
+                return { height: tempH, rows: testAllRows, hArr: tempRowH };
+            };
+
+            if (nSmall > 0) {
+                // Iteratively test row counts to find the partition that naturally fits innerH perfectly
+                const totalRatio = smallRatios.reduce((a,b)=>a+b,0);
+                for (let r = 1; r <= nSmall; r++) {
+                    const targetSum = totalRatio / r;
+                    const testSmall = packRows(smallRatios, targetSum);
+                    const res = testLayout(testSmall);
+                    
+                    // We stretch to fit innerH perfectly. We want a stretch factor as close to 1.0 as possible
+                    const stretch = innerH / res.height;
+                    const err = Math.abs(1.0 - stretch);
+                    
+                    if (err < bestStretch) {
+                        bestStretch = err;
+                        bestRows = res.rows;
+                        bestRowHeights = res.hArr;
+                        bestH = res.height;
+                    }
+                }
             } else {
-                for (let row of smallRows) allPhotoRows.push({ ratios: row, isLarge: false });
+                const res = testLayout([]);
+                bestRows = res.rows;
+                bestRowHeights = res.hArr;
+                bestH = res.height;
+                bestStretch = innerH / bestH;
             }
 
-            // ── Compute EXACT row heights (NO artificial height scaling — preserves strict ratios) ──
-            // h_i = (innerW - (n_i-1)*gapPx) / sum(ratios_i)
-            // This mathematically dictates the heights. 'Large' photos naturally happen
-            // because K is small, so sum(ratios) is small, naturally expanding their width/height!
-            const rowHeights = allPhotoRows.map(row => {
-                const n   = row.ratios.length || 1;
-                const sum = row.ratios.reduce((a,b)=>a+b, 0) || 1;
-                const availW = innerW - (n - 1) * gapPx;
-                let h = availW / sum;
-                return Math.max(1, h);
-            });
-
-            // Calculate exact total height required
-            const totalH = rowHeights.reduce((a,b)=>a+b,0) + gapPx * (allPhotoRows.length - 1);
+            const allPhotoRows = bestRows;
             
-            // To ensure 100% fit inside the layout dimension WITHOUT overlapping or violating dimension
-            const renderScale = Math.min(1.0, innerH / totalH);
+            // To ensure 100% gapless fill of the exact dimension, we MUST stretch slightly.
+            // The optimizer guarantees this stretch is minimally distorting to ratios.
+            const renderScale = 1.0;
+            const structuralStretch = innerH / bestH;
+            
+            // Multiply heights by structuralStretch so they perfectly fill canvas cleanly without gaps!
+            const rowHeights = bestRowHeights.map(h => h * structuralStretch);
+            const totalH = innerH; // guaranteed perfectly handled mathematically
+
 
             // ── Build flat cell list ─────────────────────────────────────────────────
             let idCounter = 1;
