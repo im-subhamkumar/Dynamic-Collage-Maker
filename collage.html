@@ -428,18 +428,23 @@
                 for (let row of smallRows) allPhotoRows.push({ ratios: row, isLarge: false });
             }
 
-            // ── Compute EXACT row heights (NO stretchFactor — preserves strict ratios) ──
+            // ── Compute EXACT row heights (NO artificial height scaling — preserves strict ratios) ──
             // h_i = (innerW - (n_i-1)*gapPx) / sum(ratios_i)
-            // This guarantees: cellWidth = ratio * h_i  →  actual ratio = ratio ✓
+            // This mathematically dictates the heights. 'Large' photos naturally happen
+            // because K is small, so sum(ratios) is small, naturally expanding their width/height!
             const rowHeights = allPhotoRows.map(row => {
                 const n   = row.ratios.length || 1;
                 const sum = row.ratios.reduce((a,b)=>a+b, 0) || 1;
                 const availW = innerW - (n - 1) * gapPx;
                 let h = availW / sum;
-                // Large band: make 2× taller — ratios still preserved (just becomes 3:2 taller)
-                if (row.isLarge) h *= 2;
                 return Math.max(1, h);
             });
+
+            // Calculate exact total height required
+            const totalH = rowHeights.reduce((a,b)=>a+b,0) + gapPx * (allPhotoRows.length - 1);
+            
+            // To ensure 100% fit inside the layout dimension WITHOUT overlapping or violating dimension
+            const renderScale = Math.min(1.0, innerH / totalH);
 
             // ── Build flat cell list ─────────────────────────────────────────────────
             let idCounter = 1;
@@ -450,7 +455,7 @@
                 cells:   row.ratios.map(ratio => ({ id: idCounter++, ratio }))
             }));
 
-            currentLayout = { flatRows, borderPx, gapPx, wrapW, wrapH, innerW, innerH, K, Wdoc, Hdoc };
+            currentLayout = { flatRows, borderPx, gapPx, wrapW, wrapH, innerW, innerH, K, Wdoc, Hdoc, renderScale, totalH };
             renderLayout();
         }
 
@@ -458,31 +463,42 @@
 
         function renderLayout() {
             if (!currentLayout) return;
-            const { flatRows, borderPx, gapPx, wrapW, wrapH, innerW } = currentLayout;
+            const { flatRows, borderPx, gapPx, wrapW, wrapH, innerW, innerH, renderScale, totalH } = currentLayout;
 
-            // Size the wrapper (canvas)
+            // Size the wrapper (canvas) exactly to user specifications
             wrapper.style.width    = `${wrapW}px`;
             wrapper.style.height   = `${wrapH}px`;
-            wrapper.style.padding  = `${borderPx}px`;
+            
+            // Calculate dynamic padding so it gracefully centers!
+            const finalW = innerW * renderScale;
+            const finalH = totalH * renderScale;
+            const padX = borderPx + (innerW - finalW) / 2;
+            const padY = borderPx + (innerH - finalH) / 2;
+            
+            wrapper.style.padding  = `${padY}px ${padX}px`;
             wrapper.style.boxSizing = 'border-box';
             wrapper.style.display  = 'flex';
             wrapper.style.flexDirection = 'column';
-            wrapper.style.gap      = `${gapPx}px`;
+            wrapper.style.gap      = `${gapPx * renderScale}px`; // scale gap appropriately!
             wrapper.innerHTML = '';
 
             for (const row of flatRows) {
                 const rowEl = document.createElement('div');
                 const sumRatios   = row.cells.reduce((a, c) => a + c.ratio, 0);
                 const totalGapsX  = gapPx * (row.cells.length - 1);
-                // availRowW = innerW from wrapper padding; row width is 100% of innerW
-                // Each cell width is its proportional share so actual ratio = ratio/sumRatios * availRowW / rowH = ratio ✓
-                const availRowW   = wrapW - 2 * borderPx - totalGapsX;
+                
+                // Scale width and heights perfectly to render bounds 
+                const renderRowH = row.height * renderScale;
+                const renderInnerW = innerW * renderScale;
+                const renderGapsX = totalGapsX * renderScale;
+                
+                const availRowW   = renderInnerW - renderGapsX;
 
                 rowEl.style.cssText = [
                     'display:flex',
                     'flex-direction:row',
-                    `gap:${gapPx}px`,
-                    `height:${row.height}px`,
+                    `gap:${gapPx * renderScale}px`,
+                    `height:${renderRowH}px`,
                     'flex-shrink:0',
                     'width:100%',
                     'overflow:hidden'
@@ -494,8 +510,6 @@
                     div.className  = 'cell';
                     div.dataset.id = cell.id;
 
-                    // Exact width = proportional share of available row width
-                    // This guarantees rendered ratio = cell.ratio regardless of stretchFactor
                     const cellW = (cell.ratio / sumRatios) * availRowW;
                     div.style.cssText = [
                         `width:${cellW}px`,
@@ -504,10 +518,10 @@
                         'overflow:hidden',
                         'position:relative'
                     ].join(';');
-                    // Last cell absorbs only sub-pixel rounding (no ratio distortion)
+                    // Last cell absorbs only sub-pixel rounding
                     if (ci === row.cells.length - 1) {
                         div.style.flexGrow = '1';
-                        div.style.maxWidth = `${cellW + gapPx}px`; // cap growth to 1 gap-width max
+                        div.style.maxWidth = `${cellW + gapPx * renderScale}px`;
                     }
 
                     div.innerHTML = `<div class="placeholder">Click<br>Slot</div><img id="img-${cell.id}">`;
@@ -631,20 +645,28 @@
             ctx.fillRect(0, 0, cW, cH);
             if (globalBgImageObj) drawCover(ctx, globalBgImageObj, 0, 0, cW, cH, 50, 50);
 
-            const sBorder = borderPx * scale;
-            const sGap    = gapPx * scale;
-            let curY = sBorder;
+            const rs = renderScale || 1.0;
+            const finalW = innerW * rs;
+            const finalH = totalH * rs;
+            const padX = borderPx + (innerW - finalW) / 2;
+            const padY = borderPx + (innerH - finalH) / 2;
+
+            const sPadX = padX * scale;
+            const sPadY = padY * scale;
+            const sGap  = gapPx * rs * scale;
+
+            let curY = sPadY;
             for (const row of flatRows) {
-                const rowH = row.height * scale;
-                let curX = sBorder;
+                const rowH = row.height * rs * scale;
+                let curX = sPadX;
                 const totalGapX = sGap * (row.cells.length - 1);
-                const availW    = (innerW * scale) - totalGapX;
+                const availW    = (innerW * rs * scale) - totalGapX;
                 const sumRatios = row.cells.reduce((a,c)=>a+c.ratio, 0);
 
                 for (let ci=0; ci<row.cells.length; ci++) {
                     const cell  = row.cells[ci];
                     let cellW   = (cell.ratio / sumRatios) * availW;
-                    if (ci === row.cells.length - 1) cellW = (sBorder + innerW*scale) - curX;
+                    if (ci === row.cells.length - 1) cellW = (sPadX + innerW*rs*scale) - curX;
                     if (cellData[cell.id]) {
                         const cd = cellData[cell.id];
                         drawCover(ctx, cd.img, curX, curY, cellW, rowH, cd.offsetX, cd.offsetY);
