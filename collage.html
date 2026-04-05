@@ -370,118 +370,92 @@
             const Hdoc = parseFloat(inpHeight.value) || 20;
             const canvasAspect = Wdoc / Hdoc;
 
-            // Border: applied as padding on wrapper element
             const borderInches = parseFloat(inpBorder.value) || 0;
             const gapPx = parseFloat(inpGap.value) || 5;
 
-            // Update display values
             document.getElementById('valBorder').innerText = `${borderInches}"`;
             document.getElementById('valGap').innerText    = `${gapPx}px`;
 
-            // Measure available viewport space
             const mainView = document.querySelector('.main-view');
-            mainView.style.padding = '40px'; // fixed comfortable margin
+            mainView.style.padding = '40px';
             const viewW = mainView.clientWidth  - 80;
             const viewH = mainView.clientHeight - 80;
 
-            // Fit canvas to viewport maintaining aspect ratio
             let wrapW, wrapH;
             if (viewW / viewH > canvasAspect) { wrapH = viewH; wrapW = viewH * canvasAspect; }
             else                              { wrapW = viewW; wrapH = viewW / canvasAspect; }
 
-            // Border in pixels relative to wrapper
-            const borderFrac  = borderInches / Wdoc;
-            const borderPx    = Math.round(borderFrac * wrapW);
-
-            // Inner drawable area (inside border)
+            const borderFrac = borderInches / Wdoc;
+            const borderPx   = Math.round(borderFrac * wrapW);
             const innerW = wrapW - 2 * borderPx;
             const innerH = wrapH - 2 * borderPx;
 
-            // Get photo ratios
-            const allRatios = getPhotoRatios(N);
-
-            // Separate: first K are large (center), rest are small
+            const allRatios   = getPhotoRatios(N);
             const largeRatios = allRatios.slice(0, K);
             const smallRatios = allRatios.slice(K);
 
-            // How many ratio-unit columns fit across inner width?
-            // For small rows: target ratio sum ≈ innerW / smallCellH
-            // We want roughly sqrt(N * canvasAspect) rows
+            // ── Row packing ─────────────────────────────────────────────────────────
+            // For STRICT ratios, row height h_i = (innerW - gaps_i) / sum(ratios_i)
+            // We want total height ≈ innerH. Solve for best number of rows:
+            // Each row with n_avg photos, sum ≈ n_avg * avgRatio, h ≈ (innerW - n_avg*gap) / (n_avg*avgRatio)
+            // nRows * h ≈ innerH  →  nRows ≈ innerH * n_avg * avgRatio / innerW
+            // Also nRows * n_avg ≈ N  →  n_avg ≈ N / nRows
+            // Combining: nRows^2 ≈ innerH * N * avgRatio / innerW
             const nSmall = smallRatios.length;
-            let targetRowH_small = 0;
             let smallRows = [];
-
             if (nSmall > 0) {
-                // Estimate a good target ratio sum per row
-                // naturalH = innerW / sum_of_ratios_in_row
-                // We want: nRows * naturalH + (nRows-1)*gap ≈ innerH (if no large photos)
-                // approximate: nRows ≈ sqrt(nSmall / canvasAspect)
-                const nRowsEst = Math.max(1, Math.round(Math.sqrt(nSmall / canvasAspect)));
+                const avgRatio = smallRatios.reduce((a,b)=>a+b,0) / nSmall;
+                const nRowsEst = Math.max(1, Math.round(Math.sqrt(innerH * nSmall * avgRatio / innerW)));
+                // Target ratio sum per row = total / nRows
                 const targetRatioSum = smallRatios.reduce((a,b)=>a+b,0) / nRowsEst;
                 smallRows = packRows(smallRatios, targetRatioSum);
             }
 
-            // Large center row: all K large photos in one thick row
-            let largeRow = largeRatios; // all in one row
-
-            // Now compute row heights so total fills innerH exactly
-            // Heights are proportional to: h_row = innerW / rowRatioSum
-            // Then we scale all heights uniformly to fill innerH
-
+            // ── Assemble all rows ────────────────────────────────────────────────────
             const allPhotoRows = [];
-            let largeBandIdx = -1;
-            if (K > 0 && smallRows.length >= 2) {
-                largeBandIdx = Math.floor(smallRows.length / 2);
-                for (let i=0; i<smallRows.length; i++) {
+            if (K > 0 && smallRows.length >= 1) {
+                const midIdx = Math.floor(smallRows.length / 2);
+                for (let i = 0; i < smallRows.length; i++) {
                     allPhotoRows.push({ ratios: smallRows[i], isLarge: false });
-                    if (i === largeBandIdx - 1) {
-                        allPhotoRows.push({ ratios: largeRow, isLarge: true });
-                    }
+                    if (i === midIdx - 1) allPhotoRows.push({ ratios: largeRatios, isLarge: true });
                 }
+                // Edge case: if midIdx===0, prepend
+                if (midIdx === 0) allPhotoRows.unshift({ ratios: largeRatios, isLarge: true });
             } else if (K > 0) {
-                // Not enough small rows: large band at top, small below
-                allPhotoRows.push({ ratios: largeRow, isLarge: true });
+                allPhotoRows.push({ ratios: largeRatios, isLarge: true });
                 for (let row of smallRows) allPhotoRows.push({ ratios: row, isLarge: false });
             } else {
                 for (let row of smallRows) allPhotoRows.push({ ratios: row, isLarge: false });
             }
 
-            // Compute natural heights (when stretched to innerW)
-            // naturalH[i] = innerW / sum(ratios[i])
-            // Then scale all by factor so sum(naturalH) + gaps = innerH
-            const nRows = allPhotoRows.length;
-            const totalGapY = gapPx * (nRows - 1);
-            let naturalHeights = allPhotoRows.map(row => {
-                const sum = row.ratios.reduce((a,b)=>a+b, 0);
-                return sum > 0 ? innerW / sum : 0;
+            // ── Compute EXACT row heights (NO stretchFactor — preserves strict ratios) ──
+            // h_i = (innerW - (n_i-1)*gapPx) / sum(ratios_i)
+            // This guarantees: cellWidth = ratio * h_i  →  actual ratio = ratio ✓
+            const rowHeights = allPhotoRows.map(row => {
+                const n   = row.ratios.length || 1;
+                const sum = row.ratios.reduce((a,b)=>a+b, 0) || 1;
+                const availW = innerW - (n - 1) * gapPx;
+                let h = availW / sum;
+                // Large band: make 2× taller — ratios still preserved (just becomes 3:2 taller)
+                if (row.isLarge) h *= 2;
+                return Math.max(1, h);
             });
 
-            // Large rows naturally are taller (fewer photos). Make them even taller by 2x if K>0
-            if (K > 0) {
-                for (let i=0; i<allPhotoRows.length; i++) {
-                    if (allPhotoRows[i].isLarge) naturalHeights[i] *= 2;
-                }
-            }
-
-            const totalNatural = naturalHeights.reduce((a,b)=>a+b,0);
-            const stretchFactor = (innerH - totalGapY) / totalNatural;
-            const rowHeights = naturalHeights.map(h => h * stretchFactor);
-
-            // Build flat element list with sequential IDs
+            // ── Build flat cell list ─────────────────────────────────────────────────
             let idCounter = 1;
             const flatRows = allPhotoRows.map((row, ri) => ({
-                ratios: row.ratios,
-                height: rowHeights[ri],
+                ratios:  row.ratios,
+                height:  rowHeights[ri],
                 isLarge: row.isLarge,
-                cells: row.ratios.map(ratio => ({ id: idCounter++, ratio }))
+                cells:   row.ratios.map(ratio => ({ id: idCounter++, ratio }))
             }));
 
-            currentLayout = { flatRows, borderPx, gapPx, wrapW, wrapH, innerW, innerH, K,
-                              Wdoc, Hdoc };
+            currentLayout = { flatRows, borderPx, gapPx, wrapW, wrapH, innerW, innerH, K, Wdoc, Hdoc };
             renderLayout();
         }
 
         // ─── Core: render layout to DOM ───────────────────────────────────────────────
+
         function renderLayout() {
             if (!currentLayout) return;
             const { flatRows, borderPx, gapPx, wrapW, wrapH, innerW } = currentLayout;
