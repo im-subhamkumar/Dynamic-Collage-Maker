@@ -498,6 +498,12 @@
 
             for (const row of flatRows) {
                 const rowEl = document.createElement('div');
+                const sumRatios   = row.cells.reduce((a, c) => a + c.ratio, 0);
+                const totalGapsX  = gapPx * (row.cells.length - 1);
+                // availRowW = innerW from wrapper padding; row width is 100% of innerW
+                // Each cell width is its proportional share so actual ratio = ratio/sumRatios * availRowW / rowH = ratio ✓
+                const availRowW   = wrapW - 2 * borderPx - totalGapsX;
+
                 rowEl.style.cssText = [
                     'display:flex',
                     'flex-direction:row',
@@ -510,12 +516,13 @@
 
                 for (let ci = 0; ci < row.cells.length; ci++) {
                     const cell = row.cells[ci];
-                    const div = document.createElement('div');
-                    div.className = 'cell';
+                    const div  = document.createElement('div');
+                    div.className  = 'cell';
                     div.dataset.id = cell.id;
 
-                    // Width = height * ratio; last cell uses flex:1 to absorb rounding
-                    const cellW = row.height * cell.ratio;
+                    // Exact width = proportional share of available row width
+                    // This guarantees rendered ratio = cell.ratio regardless of stretchFactor
+                    const cellW = (cell.ratio / sumRatios) * availRowW;
                     div.style.cssText = [
                         `width:${cellW}px`,
                         'height:100%',
@@ -523,8 +530,10 @@
                         'overflow:hidden',
                         'position:relative'
                     ].join(';');
+                    // Last cell absorbs only sub-pixel rounding (no ratio distortion)
                     if (ci === row.cells.length - 1) {
-                        div.style.flex = '1 0 auto';
+                        div.style.flexGrow = '1';
+                        div.style.maxWidth = `${cellW + gapPx}px`; // cap growth to 1 gap-width max
                     }
 
                     div.innerHTML = `<div class="placeholder">Click<br>Slot</div><img id="img-${cell.id}">`;
