@@ -244,6 +244,11 @@
                     <input type="number" id="inpSquares" value="14" min="0">
                     <div style="font-size:11px; color:#888; text-align:center; margin-top:4px;">Squares</div>
                 </div>
+                <span style="color: #666; font-size:16px;">+</span>
+                <div style="flex: 1;">
+                    <input type="number" id="inpLandscapes" value="0" min="0">
+                    <div style="font-size:11px; color:#888; text-align:center; margin-top:4px;">Landscapes</div>
+                </div>
             </div>
 
             <button id="btnRegenerate" class="btn" style="margin-top: 10px;">Apply & Randomize Layout</button>
@@ -302,6 +307,8 @@
         const inpSquares   = document.getElementById('inpSquares');
         const fileInput    = document.getElementById('imageInput');
 
+        const inpLandscapes = document.getElementById('inpLandscapes');
+
         // ─── State ────────────────────────────────────────────────────────────────────
         let currentMode   = 'swap';
         let currentLayout = null;   // { rows: [[{id,ratio},...], ...], largeRows: [[...]], K, borderPx, gapPx, wrapW, wrapH }
@@ -326,16 +333,24 @@
             if (use) {
                 let P = parseInt(inpPortraits.value) || 0;
                 let S = parseInt(inpSquares.value)   || 0;
-                // Clamp to N
-                if (P + S > N) { let sc = N/(P+S); P = Math.round(P*sc); S = Math.round(S*sc); }
-                // Any slot not covered by P or S falls back to portrait
-                const leftover = N - P - S;
-                for (let i=0;i<P;i++)        arr.push(0.75); // portrait 3:4
-                for (let i=0;i<S;i++)        arr.push(1.0);  // square 1:1
+                let L = parseInt(inpLandscapes.value) || 0;
+                // Clamp mathematically gracefully mapping 4:3 identically dynamically cleanly
+                if (P + S + L > N) { 
+                    let sc = N / (P + S + L); 
+                    P = Math.round(P * sc); S = Math.round(S * sc); L = Math.max(0, N - P - S); 
+                }
+                const leftover = N - P - S - L;
+                for (let i=0;i<P;i++) arr.push(0.75); // portrait 3:4
+                for (let i=0;i<S;i++) arr.push(1.0);  // square 1:1
+                for (let i=0;i<L;i++) arr.push(1.3333); // landscape 4:3
                 for (let i=0;i<leftover;i++) arr.push(0.75); // overflow → portrait
             } else {
-                // Default: 85% portrait 3:4, 15% square — never landscape
-                for (let i=0;i<N;i++) arr.push(Math.random() < 0.85 ? 0.75 : 1.0);
+                for (let i=0;i<N;i++) {
+                    let r = Math.random();
+                    if (r < 0.6) arr.push(0.75);
+                    else if (r < 0.85) arr.push(1.0);
+                    else arr.push(1.3333);
+                }
             }
             // Shuffle
             for (let i=arr.length-1;i>0;i--){ let j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]]; }
@@ -390,176 +405,257 @@
             const innerW = wrapW - 2 * borderPx;
             const innerH = wrapH - 2 * borderPx;
 
-            const allRatios   = getPhotoRatios(N);
-            const largeRatios = allRatios.slice(0, K);
-            const smallRatios = allRatios.slice(K);
+            const allRatios = getPhotoRatios(N);
+            const actualK = Math.min(K, allRatios.length);
+            const largeRatios = allRatios.slice(0, actualK);
+            const smallRatios = allRatios.slice(actualK);
 
-            // ── Row packing (OPTIMIZED FOR ZERO GAPS & MINIMAL DISTORTION) ──────────
-            const nSmall = smallRatios.length;
-            let bestRows = [];
-            let bestStretch = Infinity;
-            let bestH = 0;
-            let bestRowHeights = [];
-
-            // Helper to calc heights given a specific smallRows partition
-            const testLayout = (testSmallRows) => {
-                const testAllRows = [];
-                if (K > 0 && testSmallRows.length >= 1) {
-                    const midIdx = Math.floor(testSmallRows.length / 2);
-                    for (let i = 0; i < testSmallRows.length; i++) {
-                        testAllRows.push({ ratios: testSmallRows[i], isLarge: false });
-                        if (i === midIdx - 1) testAllRows.push({ ratios: largeRatios, isLarge: true });
+            const packSingles = (ratiosArr, targetSum) => {
+                if (ratiosArr.length === 0) return [];
+                let rows = [], cur = [], curSum = 0;
+                for (let r of ratiosArr) {
+                    if (cur.length > 0 && curSum + r * 0.45 > targetSum) {
+                        rows.push(cur); cur = []; curSum = 0;
                     }
-                    if (midIdx === 0) testAllRows.unshift({ ratios: largeRatios, isLarge: true });
-                } else if (K > 0) {
-                    testAllRows.push({ ratios: largeRatios, isLarge: true });
-                    for (let row of testSmallRows) testAllRows.push({ ratios: row, isLarge: false });
-                } else {
-                    for (let row of testSmallRows) testAllRows.push({ ratios: row, isLarge: false });
+                    cur.push(r); curSum += r;
                 }
-
-                // Calc natural height: to prevent K=1 from exploding to 400% height, we enforce a MAX height on its row
-                // by using an artificial minimum sum ratio (acting as empty buffer space) to force it to be reasonable.
-                let tempRowH = testAllRows.map(row => {
-                    const n = row.ratios.length || 1;
-                    let sum = row.ratios.reduce((a,b)=>a+b, 0) || 1;
-                    // Prevent large rows from massively exploding vertical boundaries
-                    if (row.isLarge && sum < 1.5) sum = 1.5; 
-                    
-                    const availW = innerW - (n - 1) * gapPx;
-                    let h = availW / sum;
-                    return Math.max(1, h);
-                });
-
-                const tempH = tempRowH.reduce((a,b)=>a+b,0) + gapPx * (testAllRows.length - 1);
-                return { height: tempH, rows: testAllRows, hArr: tempRowH };
+                if (cur.length > 0) rows.push(cur);
+                return rows;
             };
 
-            if (nSmall > 0) {
-                // Iteratively test row counts to find the partition that naturally fits innerH perfectly
-                const totalRatio = smallRatios.reduce((a,b)=>a+b,0);
-                for (let r = 1; r <= nSmall; r++) {
-                    const targetSum = totalRatio / r;
-                    const testSmall = packRows(smallRatios, targetSum);
-                    const res = testLayout(testSmall);
-                    
-                    // We stretch to fit innerH perfectly. We want a stretch factor as close to 1.0 as possible
-                    const stretch = innerH / res.height;
-                    const err = Math.abs(1.0 - stretch);
-                    
-                    if (err < bestStretch) {
-                        bestStretch = err;
-                        bestRows = res.rows;
-                        bestRowHeights = res.hArr;
-                        bestH = res.height;
+            const testPhaseLayout = (arrayOfRowArrays) => {
+                 let tempH = 0, heights = [];
+                 for (let row of arrayOfRowArrays) {
+                     let sumRatios = 0, extraW = 0, items = 0;
+                     for (let node of row) {
+                         if (typeof node === 'number') {
+                             sumRatios += node; items++;
+                         } else {
+                             let cCount = node.length;
+                             let aComp = 1 / (node.reduce((s,r) => s + 1/r, 0));
+                             sumRatios += aComp; extraW += gapPx * (cCount - 1) * aComp; items++;
+                         }
+                     }
+                     if (sumRatios < 0.01) sumRatios = 0.01;
+                     const availW = innerW - gapPx * (Math.max(1, items) - 1) + extraW;
+                     const h = availW / sumRatios;
+                     heights.push(Math.max(1, h));
+                     tempH += Math.max(1, h);
+                 }
+                 tempH += gapPx * (Math.max(1, arrayOfRowArrays.length) - 1);
+                 return { height: tempH, rows: arrayOfRowArrays, heights };
+            };
+
+            let bestRowsRaw = [];
+            let bestRowHeights = [];
+            let bestStretch = Infinity;
+            let bestH = 0;
+
+            const BASE_EPOCHS = (actualK === 0 || largeRatios.length === 0) ? 100 : 50;
+
+            for (let epoch = 0; epoch < BASE_EPOCHS; epoch++) {
+                // Randomly permutate subset ordering unlocking massive geometric variations organically natively perfectly mapping bounds
+                let eSms = [...smallRatios];
+                for(let i = eSms.length - 1; i > 0; i--) {
+                    let j = Math.floor(Math.random() * (i + 1));
+                    [eSms[i], eSms[j]] = [eSms[j], eSms[i]];
+                }
+
+                if (actualK === 0 || largeRatios.length === 0) {
+                    const totalSm = eSms.reduce((a,b)=>a+b, 0);
+                    const maxRows = Math.max(1, eSms.length);
+                    for (let r = 1; r <= maxRows; r++) {
+                        let partition = packSingles(eSms, totalSm / r);
+                        let res = testPhaseLayout(partition);
+                        let avgH = res.height / partition.length;
+                        let penalty = 0;
+                        for (let h of res.heights) {
+                            if (h > avgH * 1.4) penalty += 1000;
+                            if (h < avgH * 0.7) penalty += 500;
+                        }
+                        let err = Math.abs(1.0 - (innerH / res.height)) + penalty;
+                        if (err < bestStretch) {
+                             bestStretch = err; bestRowsRaw = res.rows; bestRowHeights = res.heights; bestH = res.height;
+                        }
+                    }
+                } else {
+                    for (let C = 2; C <= 4; C++) {
+                        const maxP = Math.floor(eSms.length / (2 * C));
+                        let minP = (maxP > 0) ? 1 : 0;
+                        if (minP === 0 && eSms.length >= 4) continue; 
+
+                        for (let P = minP; P <= maxP; P++) {
+                            const usedMid = 2 * C * P;
+                            const midSms = eSms.slice(0, usedMid);
+                            const remSms = eSms.slice(usedMid);
+                            
+                            let midRowConfig = [];
+                            for (let i=0; i<P; i++) {
+                                let leftCol = [];
+                                for (let k=0; k<C; k++) leftCol.push(midSms[i*2*C + k]);
+                                midRowConfig.push(leftCol);
+                            }
+                            for (let l of largeRatios) midRowConfig.push(l);
+                            for (let i=0; i<P; i++) {
+                                let rightCol = [];
+                                for (let k=0; k<C; k++) rightCol.push(midSms[i*2*C + C + k]);
+                                midRowConfig.push(rightCol);
+                            }
+                            
+                            if (P === 0 && eSms.length > 0) {
+                                midRowConfig = [];
+                                let half = Math.floor(eSms.length/2);
+                                for(let i=0; i<half; i++) midRowConfig.push(eSms[i]);
+                                for(let l of largeRatios) midRowConfig.push(l);
+                                for(let i=half; i<eSms.length; i++) midRowConfig.push(eSms[i]);
+                            }
+
+                            let topSms = P===0 ? [] : remSms.slice(0, Math.ceil(remSms.length / 2));
+                            let botSms = P===0 ? [] : remSms.slice(Math.ceil(remSms.length / 2));
+                            
+                            let maxTr = Math.max(1, topSms.length);
+                            let maxBr = Math.max(1, botSms.length);
+                            let topRatSum = topSms.reduce((a,b)=>a+b, 0);
+                            let botRatSum = botSms.reduce((a,b)=>a+b, 0);
+
+                            for (let rT = 1; rT <= maxTr; rT++) {
+                                for (let rB = 1; rB <= maxBr; rB++) {
+                                    let topBlocks = packSingles(topSms, topRatSum / rT);
+                                    let botBlocks = packSingles(botSms, botRatSum / rB);
+                                    
+                                    let layoutCols = [];
+                                    if (topBlocks.length > 0 && topBlocks[0].length > 0) layoutCols.push(...topBlocks);
+                                    let midIndex = layoutCols.length;
+                                    layoutCols.push(midRowConfig);
+                                    if (botBlocks.length > 0 && botBlocks[0].length > 0) layoutCols.push(...botBlocks);
+                                    
+                                    let res = testPhaseLayout(layoutCols);
+                                    let objHMid = res.heights[midIndex];
+                                    let penalty = 0;
+                                    let outerHSum = 0, outerCount = 0;
+                                    
+                                    for (let ri=0; ri<res.heights.length; ri++) {
+                                        if (ri !== midIndex) {
+                                            if (res.heights[ri] > objHMid * 0.75) penalty += 1000;
+                                            outerHSum += res.heights[ri]; outerCount++;
+                                        }
+                                    }
+
+                                    if (P > 0 && outerCount > 0) {
+                                        let outerAvgH = outerHSum / outerCount;
+                                        let innerAvgH = objHMid / C;
+                                        if (innerAvgH > outerAvgH * 1.5) penalty += 2000;
+                                        if (innerAvgH < outerAvgH * 0.5) penalty += 2000;
+                                    }
+
+                                    let err = Math.abs(1.0 - (innerH / res.height)) + penalty;
+                                    if (err < bestStretch) {
+                                        bestStretch = err; bestRowsRaw = res.rows; bestRowHeights = res.heights; bestH = res.height;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-            } else {
-                const res = testLayout([]);
-                bestRows = res.rows;
-                bestRowHeights = res.hArr;
-                bestH = res.height;
-                bestStretch = innerH / bestH;
             }
 
-            const allPhotoRows = bestRows;
-            
-            // To ensure 100% gapless fill of the exact dimension, we MUST stretch slightly.
-            // The optimizer guarantees this stretch is minimally distorting to ratios.
-            const renderScale = 1.0;
             const structuralStretch = innerH / bestH;
-            
-            // Multiply heights by structuralStretch so they perfectly fill canvas cleanly without gaps!
-            const rowHeights = bestRowHeights.map(h => h * structuralStretch);
-            const totalH = innerH; // guaranteed perfectly handled mathematically
+            const finalRowHeights = bestRowHeights.map(h => h * structuralStretch);
 
-
-            // ── Build flat cell list ─────────────────────────────────────────────────
+            let flatRows = [];
             let idCounter = 1;
-            const flatRows = allPhotoRows.map((row, ri) => ({
-                ratios:  row.ratios,
-                height:  rowHeights[ri],
-                isLarge: row.isLarge,
-                cells:   row.ratios.map(ratio => ({ id: idCounter++, ratio }))
-            }));
+            for (let ri = 0; ri < bestRowsRaw.length; ri++) {
+                let rowNodes = bestRowsRaw[ri];
+                let rowH = finalRowHeights[ri];
+                let cells = [];
+                let sumRatios = 0, extraW = 0;
 
-            currentLayout = { flatRows, borderPx, gapPx, wrapW, wrapH, innerW, innerH, K, Wdoc, Hdoc, renderScale, totalH };
+                for (let node of rowNodes) {
+                    if (typeof node === 'number') sumRatios += node;
+                    else {
+                        let aComp = 1 / (node.reduce((s,r) => s + 1/r, 0));
+                        sumRatios += aComp; extraW += gapPx * (node.length - 1) * aComp;
+                    }
+                }
+                const availW = innerW - gapPx * (Math.max(1, rowNodes.length) - 1) + extraW;
+
+                for (let node of rowNodes) {
+                    if (typeof node === 'number') {
+                        let renderedW = (node / sumRatios) * availW;
+                        cells.push({ type: 'single', id: idCounter++, ratio: node, domW: renderedW });
+                    } else {
+                        let aComp = 1 / (node.reduce((s,r) => s + 1/r, 0));
+                        let renderedW = (aComp / sumRatios) * availW;
+                        let innerCells = [];
+                        for (let k = 0; k < node.length; k++) {
+                            innerCells.push({ id: idCounter++, ratio: node[k], domH: renderedW / node[k] });
+                        }
+                        cells.push({ type: 'col', domW: renderedW, innerCells });
+                    }
+                }
+                flatRows.push({ height: rowH, cells });
+            }
+
+            currentLayout = { flatRows, borderPx, gapPx, wrapW, wrapH, innerW, innerH, K, Wdoc, Hdoc };
             renderLayout();
         }
 
         // ─── Core: render layout to DOM ───────────────────────────────────────────────
-
         function renderLayout() {
             if (!currentLayout) return;
-            const { flatRows, borderPx, gapPx, wrapW, wrapH, innerW, innerH, renderScale, totalH } = currentLayout;
+            const { flatRows, borderPx, gapPx, wrapW, wrapH, innerW } = currentLayout;
 
-            // Size the wrapper (canvas) exactly to user specifications
             wrapper.style.width    = `${wrapW}px`;
             wrapper.style.height   = `${wrapH}px`;
-            
-            // Calculate dynamic padding so it gracefully centers!
-            const finalW = innerW * renderScale;
-            const finalH = totalH * renderScale;
-            const padX = borderPx + (innerW - finalW) / 2;
-            const padY = borderPx + (innerH - finalH) / 2;
-            
-            wrapper.style.padding  = `${padY}px ${padX}px`;
+            wrapper.style.padding  = `${borderPx}px`;
             wrapper.style.boxSizing = 'border-box';
             wrapper.style.display  = 'flex';
             wrapper.style.flexDirection = 'column';
-            wrapper.style.gap      = `${gapPx * renderScale}px`; // scale gap appropriately!
+            wrapper.style.gap      = `${gapPx}px`;
             wrapper.innerHTML = '';
 
             for (const row of flatRows) {
                 const rowEl = document.createElement('div');
-                const sumRatios   = row.cells.reduce((a, c) => a + c.ratio, 0);
-                const totalGapsX  = gapPx * (row.cells.length - 1);
-                
-                // Scale width and heights perfectly to render bounds 
-                const renderRowH = row.height * renderScale;
-                const renderInnerW = innerW * renderScale;
-                const renderGapsX = totalGapsX * renderScale;
-                
-                const availRowW   = renderInnerW - renderGapsX;
-
                 rowEl.style.cssText = [
-                    'display:flex',
-                    'flex-direction:row',
-                    `gap:${gapPx * renderScale}px`,
-                    `height:${renderRowH}px`,
-                    'flex-shrink:0',
-                    'width:100%',
-                    'overflow:hidden'
+                    'display:flex', 'flex-direction:row', `gap:${gapPx}px`, 
+                    `height:${row.height}px`, 'flex-shrink:0', 'width:100%', 'overflow:hidden'
                 ].join(';');
 
                 for (let ci = 0; ci < row.cells.length; ci++) {
                     const cell = row.cells[ci];
-                    const div  = document.createElement('div');
-                    div.className  = 'cell';
-                    div.dataset.id = cell.id;
-
-                    const cellW = (cell.ratio / sumRatios) * availRowW;
-                    div.style.cssText = [
-                        `width:${cellW}px`,
-                        'height:100%',
-                        'flex-shrink:0',
-                        'overflow:hidden',
-                        'position:relative'
-                    ].join(';');
-                    // Last cell absorbs only sub-pixel rounding
-                    if (ci === row.cells.length - 1) {
-                        div.style.flexGrow = '1';
-                        div.style.maxWidth = `${cellW + gapPx * renderScale}px`;
+                    const cellW = cell.domW;
+                    
+                    if (cell.type === 'single') {
+                        const div = document.createElement('div');
+                        div.className = 'cell'; div.dataset.id = cell.id;
+                        div.style.cssText = `width:${cellW}px; height:100%; flex-shrink:0; overflow:hidden; position:relative;`;
+                        if (ci === row.cells.length - 1) { div.style.flexGrow = '1'; div.style.maxWidth = `${cellW + gapPx}px`; }
+                        div.innerHTML = `<div class="placeholder">Click<br>Slot</div><img id="img-${cell.id}">`;
+                        attachCellFeatures(div, cell.id); updateCellDOM(cell.id, div);
+                        rowEl.appendChild(div);
+                    } else {
+                        // Composite Column Base Block
+                        const colEl = document.createElement('div');
+                        colEl.style.cssText = `display:flex; flex-direction:column; gap:${gapPx}px; width:${cellW}px; height:100%; flex-shrink:0; overflow:hidden;`;
+                        if (ci === row.cells.length - 1) { colEl.style.flexGrow = '1'; colEl.style.maxWidth = `${cellW + gapPx}px`; }
+                        
+                        // Parse strictly structured inherent individual heights naturally 
+                        for (let ki = 0; ki < cell.innerCells.length; ki++) {
+                            const inner = cell.innerCells[ki];
+                            const innerH = inner.domH;
+                            const innerDiv = document.createElement('div');
+                            innerDiv.className = 'cell'; innerDiv.dataset.id = inner.id;
+                            innerDiv.style.cssText = `width:100%; height:${innerH}px; flex-shrink:0; overflow:hidden; position:relative;`;
+                            if (ki === cell.innerCells.length - 1) { innerDiv.style.flexGrow = '1'; innerDiv.style.maxHeight = `${innerH + gapPx}px`; }
+                            innerDiv.innerHTML = `<div class="placeholder">Click<br>Slot</div><img id="img-${inner.id}">`;
+                            attachCellFeatures(innerDiv, inner.id); updateCellDOM(inner.id, innerDiv);
+                            colEl.appendChild(innerDiv);
+                        }
+                        rowEl.appendChild(colEl);
                     }
-
-                    div.innerHTML = `<div class="placeholder">Click<br>Slot</div><img id="img-${cell.id}">`;
-                    attachCellFeatures(div, cell.id);
-                    updateCellDOM(cell.id, div);
-                    rowEl.appendChild(div);
                 }
                 wrapper.appendChild(rowEl);
             }
-
             setMode(currentMode);
         }
 
@@ -631,75 +727,116 @@
                 c.draggable = (mode === 'swap' && cellData[c.dataset.id]) ? true : false;
             });
         }
-
-        function updateOrientationsInput() {
+        function balanceOrientations(changedId) {
             const N = parseInt(inpCount.value) || 1;
-            const K = parseInt(document.getElementById('inpCenterLg').value) || 0;
-            const eff = Math.max(1, N - K);
-            let p = parseInt(inpPortraits.value) || 0;
-            if (p > eff) p = eff;
-            inpPortraits.value = p;
-            inpSquares.value = eff - p;
+            let P = parseInt(inpPortraits.value) || 0;
+            let S = parseInt(inpSquares.value) || 0;
+            let L = parseInt(inpLandscapes.value) || 0;
+
+            if (changedId === 'P') P = Math.max(0, P);
+            if (changedId === 'S') S = Math.max(0, S);
+            if (changedId === 'L') L = Math.max(0, L);
+
+            const adjustVars = (other1, other2, diff) => {
+                if (diff === 0) return [other1, other2];
+                if (diff > 0) {
+                     let sub1 = Math.min(other1, diff); other1 -= sub1; diff -= sub1;
+                     let sub2 = Math.min(other2, diff); other2 -= sub2; 
+                     return [other1, other2];
+                } else {
+                     other1 += (-diff); return [other1, other2];
+                }
+            };
+
+            if (changedId === 'P') {
+                if (P > N) P = N;
+                let diff = (P + S + L) - N;
+                [S, L] = adjustVars(S, L, diff);
+            } else if (changedId === 'S') {
+                if (S > N) S = N;
+                let diff = (P + S + L) - N;
+                [P, L] = adjustVars(P, L, diff);
+            } else if (changedId === 'L') {
+                if (L > N) L = N;
+                let diff = (P + S + L) - N;
+                [P, S] = adjustVars(P, S, diff);
+            } else if (changedId === 'N' || changedId === 'init') {
+                let sum = P + S + L;
+                if (sum === 0) { P = N; }
+                else if (sum !== N) {
+                    let rP = P / sum, rS = S / sum;
+                    P = Math.round(N * rP);
+                    S = Math.round(N * rS);
+                    L = N - P - S;
+                    if (L < 0) {
+                        if (S >= -L) S += L; else if (P >= -L) P += L;
+                        L = 0;
+                    }
+                }
+            }
+
+            inpPortraits.value = P;
+            inpSquares.value = S;
+            inpLandscapes.value = L;
         }
 
-        // ─── File Loading ─────────────────────────────────────────────────────────────
-        const loadFileToCell = (file, cellId) => new Promise(resolve => {
-            const reader = new FileReader();
-            reader.onload = ev => {
-                const img = new Image();
-                img.onload = () => {
-                    cellData[cellId] = { dataUrl: ev.target.result, img, offsetX: 50, offsetY: 50 };
-                    updateCellDOM(cellId);
-                    resolve();
-                };
-                img.src = ev.target.result;
-            };
-            reader.readAsDataURL(file);
-        });
-
-        // ─── High-Res Export ──────────────────────────────────────────────────────────
+        // ─── High Res Export ─────────────────────────────────────────────────────────
         function generateHighResCanvas() {
             if (!currentLayout) return;
-            const { flatRows, borderPx, gapPx, wrapW, wrapH, innerW, innerH, Wdoc, Hdoc } = currentLayout;
-            const DPI   = 300;
-            const cW    = Wdoc * DPI;
-            const cH    = Hdoc * DPI;
-            const scale = cW / wrapW;
+            const { flatRows, borderPx, gapPx, innerW, innerH, Wdoc, Hdoc } = currentLayout;
 
-            const canvas = document.createElement('canvas');
-            canvas.width = cW; canvas.height = cH;
-            const ctx = canvas.getContext('2d', { alpha: false });
-            ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-color').trim() || '#000';
-            ctx.fillRect(0, 0, cW, cH);
-            if (globalBgImageObj) drawCover(ctx, globalBgImageObj, 0, 0, cW, cH, 50, 50);
+            const DPI = 300;
+            const canvasW = Wdoc * DPI;
+            const canvasH = Hdoc * DPI;
 
-            const rs = renderScale || 1.0;
-            const finalW = innerW * rs;
-            const finalH = totalH * rs;
-            const padX = borderPx + (innerW - finalW) / 2;
-            const padY = borderPx + (innerH - finalH) / 2;
+            const cvs = document.createElement('canvas');
+            cvs.width = canvasW;
+            cvs.height = canvasH;
+            const ctx = cvs.getContext('2d');
 
-            const sPadX = padX * scale;
-            const sPadY = padY * scale;
-            const sGap  = gapPx * rs * scale;
+            const sBorder = (borderPx / Math.min(innerW, innerH)) * Math.min(canvasW, canvasH);
+            const logicInnerW = canvasW - 2 * sBorder;
+            const logicInnerH = canvasH - 2 * sBorder;
 
-            let curY = sPadY;
+            const fillHex = document.getElementById('inpBgColor').value || '#000';
+            ctx.fillStyle = fillHex;
+            ctx.fillRect(0, 0, canvasW, canvasH);
+
+            const sGap = (gapPx / innerW) * logicInnerW;
+            const heightMultiplier = logicInnerH / innerH;
+
+            let curY = sBorder;
             for (const row of flatRows) {
-                const rowH = row.height * rs * scale;
-                let curX = sPadX;
-                const totalGapX = sGap * (row.cells.length - 1);
-                const availW    = (innerW * rs * scale) - totalGapX;
-                const sumRatios = row.cells.reduce((a,c)=>a+c.ratio, 0);
+                const rowH = row.height * heightMultiplier;
+                let curX = sBorder;
 
                 for (let ci=0; ci<row.cells.length; ci++) {
-                    const cell  = row.cells[ci];
-                    let cellW   = (cell.ratio / sumRatios) * availW;
-                    if (ci === row.cells.length - 1) cellW = (sPadX + innerW*rs*scale) - curX;
-                    if (cellData[cell.id]) {
-                        const cd = cellData[cell.id];
-                        drawCover(ctx, cd.img, curX, curY, cellW, rowH, cd.offsetX, cd.offsetY);
+                    const cell = row.cells[ci];
+                    let cellW = (cell.domW / innerW) * logicInnerW;
+                    if (ci === row.cells.length - 1) cellW = (logicInnerW + sBorder) - curX;
+
+                    if (cell.type === 'single') {
+                        if (cellData[cell.id]) {
+                            const cd = cellData[cell.id];
+                            drawCover(ctx, cd.img, curX, curY, cellW, rowH, cd.offsetX, cd.offsetY);
+                        } else {
+                            ctx.fillStyle = '#222'; ctx.fillRect(curX, curY, cellW, rowH);
+                        }
                     } else {
-                        ctx.fillStyle = '#222'; ctx.fillRect(curX, curY, cellW, rowH);
+                        let curInnerY = curY;
+                        for (let ki=0; ki<cell.innerCells.length; ki++) {
+                             const inner = cell.innerCells[ki];
+                             let innerH = (inner.domH / row.height) * rowH;
+                             if (ki === cell.innerCells.length - 1) innerH = (curY + rowH) - curInnerY;
+                             
+                             if (cellData[inner.id]) {
+                                 const cd = cellData[inner.id];
+                                 drawCover(ctx, cd.img, curX, curInnerY, cellW, innerH, cd.offsetX, cd.offsetY);
+                             } else {
+                                 ctx.fillStyle = '#222'; ctx.fillRect(curX, curInnerY, cellW, innerH);
+                             }
+                             curInnerY += innerH + sGap;
+                        }
                     }
                     curX += cellW + sGap;
                 }
@@ -707,7 +844,7 @@
             }
 
             try {
-                const url = canvas.toDataURL('image/jpeg', 0.95);
+                const url = cvs.toDataURL('image/jpeg', 0.95);
                 const a = document.createElement('a');
                 a.download = `Collage-${Wdoc}x${Hdoc}-Print.jpg`;
                 a.href = url;
@@ -722,6 +859,27 @@
             if (ir > tr) { sh = img.height; sw = sh * tr; sx = (img.width - sw) * (ox/100); sy = 0; }
             else         { sw = img.width;  sh = sw / tr; sx = 0; sy = (img.height - sh) * (oy/100); }
             ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+        }
+
+        async function loadFileToCell(file, id) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = e => {
+                    const img = new Image();
+                    img.onload = () => {
+                        cellData[id] = {
+                            dataUrl: e.target.result,
+                            img: img,
+                            offsetX: 50,
+                            offsetY: 50
+                        };
+                        updateCellDOM(id);
+                        resolve();
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
         }
 
         // ─── Event Listeners ──────────────────────────────────────────────────────────
@@ -744,7 +902,7 @@
             // Photo count
             inpCount.addEventListener('input', () => {
                 countDisplay.innerText = inpCount.value;
-                if (chkUseOrientation.checked) updateOrientationsInput();
+                if (chkUseOrientation.checked) balanceOrientations('N');
             });
             inpCount.addEventListener('change', generateAndRender);
 
@@ -761,7 +919,7 @@
                     }
                     inpCount.min = minCount;
                 } else { inpCount.min = 1; }
-                if (chkUseOrientation.checked) updateOrientationsInput();
+                if (chkUseOrientation.checked) balanceOrientations('N');
             });
             inpCenterLg.addEventListener('change', generateAndRender);
 
@@ -772,23 +930,18 @@
             chkUseOrientation.addEventListener('change', e => {
                 orientationRow.style.opacity      = e.target.checked ? '1' : '0.3';
                 orientationRow.style.pointerEvents= e.target.checked ? 'auto' : 'none';
-                if (e.target.checked) updateOrientationsInput();
+                if (e.target.checked) balanceOrientations('init');
                 generateAndRender();
             });
 
-            inpPortraits.addEventListener('input', () => {
-                const N = parseInt(inpCount.value);
-                let p = Math.min(parseInt(inpPortraits.value)||0, N);
-                inpPortraits.value = p; inpSquares.value = N - p;
-            });
+            inpPortraits.addEventListener('input', () => balanceOrientations('P'));
             inpPortraits.addEventListener('change', generateAndRender);
 
-            inpSquares.addEventListener('input', () => {
-                const N = parseInt(inpCount.value);
-                let s = Math.min(parseInt(inpSquares.value)||0, N);
-                inpSquares.value = s; inpPortraits.value = N - s;
-            });
+            inpSquares.addEventListener('input', () => balanceOrientations('S'));
             inpSquares.addEventListener('change', generateAndRender);
+
+            inpLandscapes.addEventListener('input', () => balanceOrientations('L'));
+            inpLandscapes.addEventListener('change', generateAndRender);
 
             // Background colour
             document.getElementById('inpBgColor').addEventListener('input', e => {
@@ -823,7 +976,14 @@
                 const files = Array.from(e.target.files);
                 if (!files.length || !currentLayout) return;
 
-                const allIds = currentLayout.flatRows.flatMap(row => row.cells.map(c => c.id));
+                const allIds = [];
+                currentLayout.flatRows.forEach(row => {
+                    row.cells.forEach(c => {
+                        if (c.type === 'single') allIds.push(c.id);
+                        else c.innerCells.forEach(ic => allIds.push(ic.id));
+                    });
+                });
+                
                 let fillOrder = allIds;
                 if (targetAutoFillCellId) {
                     const si = fillOrder.indexOf(parseInt(targetAutoFillCellId));
