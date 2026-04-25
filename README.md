@@ -2,7 +2,7 @@
 
 Welcome to the **Dynamic Collage Maker**! This is a powerful, fully-client-side web application that lets you generate stunning, high-resolution photo collages with zero hassle.
 
-**🚀 Live Demo:** [https://dynamic-collage-maker-subham.netlify.app](https://dynamic-collage-maker-subham.netlify.app)
+**Live Demo:** [https://dynamic-collage-maker-subham.netlify.app](https://dynamic-collage-maker-subham.netlify.app)
 
 Whether you're a photographer looking to print a 20x30 inch poster, or just someone putting together a quick memory board, this tool is designed to feel like a professional editing suite right in your browser.
 
