@@ -1,15 +1,15 @@
-# 📸 Dynamic Collage Maker
+#  Dynamic Collage Maker
 
 Welcome to the **Dynamic Collage Maker**! This is a powerful, fully-client-side web application built in a single HTML file that lets you generate stunning, high-resolution photo collages with zero hassle. 
 
 Whether you're a photographer looking to print a 20x30 inch poster, or just someone putting together a quick memory board, this tool is designed to feel like a professional editing suite right in your browser.
 
-## ✨ Why This Exists
+##  Why This Exists
 I wanted a collage maker that wasn't restricted to rigid, pre-defined templates. Most tools force you into a specific layout or limit the number of photos you can use. 
 
 This project solves that by using a custom-built **Monte-Carlo Layout Evaluation Engine**. Under the hood, it rapidly generates thousands of random grid combinations in milliseconds, automatically selecting the most visually pleasing layout that naturally favors professional 2:3 (portrait) and 1:1 (square) aspect ratios. It's organized chaos that looks beautiful every single time!
 
-## 🚀 Features
+##  Features
 
 * **Infinite Dynamic Layouts:** Use the slider to choose anywhere from 1 to 100 photos. The algorithm will automatically build a perfect, interlocking grid for your exact number.
 * **Target Orientations:** Want exactly 15 portraits and 14 landscapes? No problem. Check the "Target Orientation" box, dial in your numbers, and the engine will instantly sculpt a grid that perfectly matches your constraints.
@@ -21,7 +21,7 @@ This project solves that by using a custom-built **Monte-Carlo Layout Evaluation
 * **Custom Backgrounds:** Pick any foundational hex color, or upload your own custom background image that cleanly renders beneath your layout gaps.
 * **Batch Uploading:** Select all your photos at once and watch them populate the grid instantly.
 
-## 🛠️ How to Use It
+##  How to Use It
 
 Because the entire application runs locally in your browser (no server or database required!), getting started is incredibly simple:
 
@@ -33,7 +33,7 @@ Because the entire application runs locally in your browser (no server or databa
 6. Drag to swap or adjust your crops.
 7. Click **Download Print (300 DPI)** and wait a moment for the high-resolution file to generate and save directly to your computer.
 
-## 💻 Tech Stack
+##  Tech Stack
 * **HTML5 / CSS3:** Utilizing advanced Flexbox properties to dynamically map aspect ratios and bounds.
 * **Vanilla JavaScript:** 
   * The core Monte-Carlo stochastic engine.
