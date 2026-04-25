@@ -26,7 +26,7 @@ This project solves that by using a custom-built **Monte-Carlo Layout Evaluation
 Because the entire application runs locally in your browser (no server or database required!), getting started is incredibly simple:
 
 1. Clone or download this repository.
-2. Open `collage.html` directly in your favorite modern web browser (Chrome, Safari, Edge).
+2. Open `index.html` directly in your favorite modern web browser (Chrome, Safari, Edge).
 3. Use the **Dimensions** inputs on the left sidebar to set your project size. (Use the ↻ button to quickly swap between portrait and landscape!)
 4. Adjust your photo count, gaps, borders, and background.
 5. Click **Upload Folder** to add your images.

@@ -1,0 +1,194 @@
+:root {
+            --gap: 5px;
+            --bg-color: #000000;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #ffffff;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar Controls */
+        .sidebar {
+            width: 330px;
+            min-width: 330px;
+            background: #1a1a1a;
+            border-right: 1px solid #333;
+            padding: 24px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+
+        .sidebar h2 {
+            margin: 0 0 5px 0;
+            font-size: 20px;
+            font-weight: 500;
+            color: #fff;
+        }
+
+        .control-group {
+            background: #242424;
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .control-group label {
+            font-size: 13px;
+            color: #aaa;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .control-group label > span { color: #fff; font-weight: 600; }
+
+        .input-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        input[type="number"], input[type="text"] {
+            background: #111;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 8px;
+            border-radius: 4px;
+            width: 100%;
+            outline: none;
+            box-sizing: border-box;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+            accent-color: #007bff;
+        }
+
+        input[type="color"] {
+            background: none;
+            border: none;
+            cursor: pointer;
+            height: 30px;
+            width: 50px;
+            padding: 0;
+        }
+        
+        input[type="checkbox"] {
+            cursor: pointer;
+            accent-color: #007bff;
+            width: 16px;
+            height: 16px;
+        }
+
+        /* Layout Main Workspace */
+        .main-view {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            background: #0a0a0a;
+            overflow: auto;
+            background-image: radial-gradient(circle, #222 1px, transparent 1px);
+            background-size: 20px 20px; /* Subtle dot pattern */
+        }
+
+        /* The dynamic Collage Wrapper Container */
+        .collage-wrapper {
+            background-color: var(--bg-color);
+            background-size: cover;
+            background-position: center;
+            box-sizing: border-box;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.8), 0 0 0 1px #444;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-content: center;
+        }
+
+        /* Native gap inheritance */
+        .flex-container {
+            display: flex;
+            gap: var(--gap);
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+        }
+        .flex-row { flex-direction: row; }
+        .flex-col { flex-direction: column; }
+
+        .cell {
+            background-color: #2a2a2a;
+            position: relative;
+            cursor: pointer;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.2s, opacity 0.2s;
+            height: 100%; 
+            box-sizing: border-box;
+        }
+
+        .cell:hover { background-color: #3b3b3b; }
+        
+        /* Drag & Drop Interaction States */
+        body[data-mode="swap"] .cell[draggable="true"] { cursor: grab; }
+        body[data-mode="swap"] .cell[draggable="true"]:active { cursor: grabbing; }
+        body[data-mode="pan"] .cell { cursor: grab; }
+        body[data-mode="pan"] .cell.panning { cursor: grabbing; }
+
+        .cell.drag-over { outline: 3px dashed #007bff; outline-offset: -3px; opacity: 0.8; z-index: 10;}
+        .cell.dragging { opacity: 0.4; }
+
+        .cell img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: 50% 50%;
+            display: none;
+            pointer-events: none;
+        }
+
+        .cell .placeholder {
+            color: #666;
+            font-size: 14px;
+            pointer-events: none;
+            text-align: center;
+            font-weight: 500;
+        }
+
+        /* Generic Button styles */
+        .btn {
+            background-color: #333; color: white; border: 1px solid #444;
+            padding: 10px 16px; font-size: 14px; font-weight: 600;
+            border-radius: 6px; cursor: pointer; transition: all 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
+            box-sizing: border-box;
+        }
+        
+        .btn-primary { background-color: #007bff; border-color: #007bff; }
+        .btn-success { background-color: #28a745; border-color: #28a745; }
+        .btn:hover:not(:disabled) { transform: translateY(-1px); opacity: 0.9; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        .btn:active:not(:disabled) { transform: translateY(1px); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-group { display: flex; background: #111; border-radius: 6px; padding: 4px; border: 1px solid #333; width: 100%; box-sizing: border-box; }
+        .btn-group .btn { background: transparent; border: none; font-size: 12px; border-radius: 4px; padding: 8px; color: #888; width: 50%; }
+        .btn-group .btn.active { background: #444; color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+
+        .hidden-input { display: none; }

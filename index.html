@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Pro Collage Builder</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body data-mode="swap">
+
+    <div class="sidebar">
+        <h2>Collage Setup</h2>
+        
+        <div class="control-group">
+            <label>Dimensions (Inches)</label>
+            <div class="input-row">
+                <input type="number" id="inpWidth" value="30" min="5" max="100" style="min-width: 0;"> 
+                <span style="color: #666; font-size:12px;">x</span>
+                <input type="number" id="inpHeight" value="20" min="5" max="100" style="min-width: 0;">
+                <button id="btnRotate" class="btn" style="flex: 0 0 auto; padding: 6px 12px; font-size: 16px; width: auto; margin-left: 5px;" title="Rotate Layout">↻</button>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <label>Outer Border Width <span id="valBorder">1.0"</span></label>
+            <input type="range" id="inpBorder" min="0" max="5" step="0.1" value="1.0">
+
+            <label style="margin-top: 5px;">Photo Gap Size <span id="valGap">5px</span></label>
+            <input type="range" id="inpGap" min="0" max="50" step="1" value="5">
+        </div>
+
+        <div class="control-group">
+            <label>Total Photos <span id="photoCountDisplay">29</span></label>
+            <input type="range" id="inpCount" value="29" min="1" max="100">
+            
+            <label style="margin-top: 10px;">Large Center Focus <span id="valCenterLg">0</span></label>
+            <input type="range" id="inpCenterLg" min="0" max="4" step="1" value="0">
+
+            <label style="justify-content: flex-start; gap: 8px; margin-top: 10px;">
+                <input type="checkbox" id="chkUseOrientation"> Target Orientation 
+            </label>
+            <div class="input-row" id="orientationRow" style="opacity: 0.3; pointer-events: none; transition: 0.2s;">
+                <div style="flex: 1;">
+                    <input type="number" id="inpPortraits" value="15" min="0">
+                    <div style="font-size:11px; color:#888; text-align:center; margin-top:4px;">Portraits</div>
+                </div>
+                <span style="color: #666; font-size:16px;">+</span>
+                <div style="flex: 1;">
+                    <input type="number" id="inpSquares" value="14" min="0">
+                    <div style="font-size:11px; color:#888; text-align:center; margin-top:4px;">Squares</div>
+                </div>
+                <span style="color: #666; font-size:16px;">+</span>
+                <div style="flex: 1;">
+                    <input type="number" id="inpLandscapes" value="0" min="0">
+                    <div style="font-size:11px; color:#888; text-align:center; margin-top:4px;">Landscapes</div>
+                </div>
+            </div>
+
+            <button id="btnRegenerate" class="btn" style="margin-top: 10px;">Apply & Randomize Layout</button>
+        </div>
+
+        <div class="control-group">
+            <label>Background Fill <input type="color" id="inpBgColor" value="#000000"></label>
+            <label style="flex-direction: column; align-items: flex-start; gap: 8px; margin-top:6px;">
+                Background Image (Optional)
+                <input type="file" id="inpBgImg" accept="image/*" style="font-size:11px; width:100%; color:#888;">
+            </label>
+        </div>
+
+        <div class="control-group">
+            <label style="justify-content: center; margin-bottom: -4px;">Interaction Mode</label>
+            <div class="btn-group">
+                <button id="modeSwapBtn" class="btn active">Swap Photos</button>
+                <button id="modePanBtn" class="btn">Adjust Crop</button>
+            </div>
+            <button id="btnUpload" class="btn btn-primary" style="margin-top:8px;">
+                <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                Upload Folder
+            </button>
+        </div>
+
+        <div style="flex:1; min-height: 20px;"></div>
+        
+        <button id="btnDownload" class="btn btn-success">
+            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+            Download Print (300 DPI)
+        </button>
+    </div>
+
+    <div class="main-view">
+        <div class="collage-wrapper" id="collageWrapper">
+            <!-- Native JS Recursive Tree generates here -->
+        </div>
+    </div>
+
+    <!-- Hidden multiple file input -->
+    <input type="file" id="imageInput" class="hidden-input" accept="image/*" multiple>
+
+    <script src="js/script.js"></script>
+</body>
+</html>
